@@ -315,3 +315,58 @@ test('the real opuromc produces diagnostics', { skip: !fs.existsSync(realCompile
   await client.notification('exit', null);
   assert.equal(await client.exited, 0);
 });
+
+test('a full-stack document exposes model fields and api paths', async t => {
+  const client = new Client(['--compiler', stubCompiler]);
+  t.after(() => client.close());
+
+  await client.request(1, 'initialize', { processId: process.pid, capabilities: {} });
+
+  const uri = 'file://the temporary checkout-lsp-test/fullstack.opu';
+  const program = [
+    'app TodoApp {',
+    '  model Todo {',
+    '    id: int primary',
+    '    title: string',
+    '  }',
+    '',
+    '  api "/todos" {',
+    '    list Todo',
+    '  }',
+    '',
+    '  state count = 0',
+    '}',
+    ''
+  ].join('\n');
+  await client.notification('textDocument/didOpen', {
+    textDocument: { uri, languageId: 'opurom', version: 1, text: program }
+  });
+  await waitForDiagnostics(client, uri);
+
+  const completion = await client.request(2, 'textDocument/completion', {
+    textDocument: { uri },
+    position: { line: 0, character: 0 }
+  });
+  const labels = completion.result.items.map(entry => entry.label);
+  for (const expected of ['Todo', 'id', 'title', '/todos']) {
+    assert.ok(labels.includes(expected), `completion offers ${expected}`);
+  }
+
+  const modelHover = await client.request(3, 'textDocument/hover', {
+    textDocument: { uri },
+    position: positionOf(program, 'model Todo', 6)
+  });
+  assert.match(modelHover.result.contents.value, /model/);
+  assert.match(modelHover.result.contents.value, /title/);
+
+  const modelDefinition = await client.request(4, 'textDocument/definition', {
+    textDocument: { uri },
+    position: positionOf(program, 'list Todo', 6)
+  });
+  assert.equal(modelDefinition.result.range.start.line, 1);
+  assert.equal(modelDefinition.result.range.start.character, 8);
+
+  await client.request(5, 'shutdown', null);
+  await client.notification('exit', null);
+  assert.equal(await client.exited, 0);
+});
