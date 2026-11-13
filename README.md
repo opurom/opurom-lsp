@@ -31,7 +31,7 @@ framing.
 | `textDocument/didOpen` | Stores the document, runs the compiler, publishes diagnostics. |
 | `textDocument/didChange` | Same as `didOpen` for the new text. |
 | `textDocument/didClose` | Drops the document and clears its diagnostics. |
-| `textDocument/hover` | Markdown for a state (type + initializer), a model (fields), a node kind (props) or a canonical prop. |
+| `textDocument/hover` | Markdown for a state (type + initializer), a model (fields), a model field (declared type), a node kind (props) or a canonical prop. An unknown word returns `null`. |
 | `textDocument/completion` | The 24 node kinds, keywords, canonical props, model field types, API verbs and the declared states and models. |
 | `textDocument/definition` | The `state` or `model` declaration line inside the same document. |
 | `textDocument/documentHighlight` | Every classified occurrence of the state name under the cursor, with `kind` 2 for the declaration and `kind` 1 for other occurrences. A cursor outside a classified state name or an unknown document URI returns `[]`. |

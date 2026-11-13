@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument } from '../lib/document.mjs';
+import { hover } from '../lib/features.mjs';
 import { foldingRanges } from '../lib/folding.mjs';
 import { documentHighlights } from '../lib/highlight.mjs';
 
@@ -210,6 +211,24 @@ const HIGHLIGHT_PROGRAM = [
   '    Input(placeholder: "Your count", bind: count)',
   '    Button("+") { count += 1 }',
   '  }',
+  '}',
+  ''
+].join('\n');
+
+const HOVER_PROGRAM = [
+  'app Shop {',
+  '  state count = 0',
+  '  state label = "cart"',
+  '  state active = true',
+  '  state closed = false',
+  '  model Item {',
+  '    id: int primary',
+  '    title: string',
+  '  }',
+  '  Column(gap: 8) {',
+  '    Text("{count} {label}")',
+  '  }',
+  '  // mystery is not declared anywhere',
   '}',
   ''
 ].join('\n');
@@ -489,6 +508,71 @@ test('a full-stack document exposes model fields and api paths', async t => {
   await client.request(5, 'shutdown', null);
   await client.notification('exit', null);
   assert.equal(await client.exited, 0);
+});
+
+test('hover reports state types, model field types and nothing for unknown words', async t => {
+  const client = new Client(['--compiler', stubCompiler]);
+  t.after(() => client.close());
+
+  await client.request(1, 'initialize', { capabilities: {} });
+
+  const uri = 'file://the temporary checkout-lsp-test/hover.opu';
+  assert.deepEqual(await openDocument(client, uri, HOVER_PROGRAM), []);
+
+  const hoverFor = (id, needle) => client.request(id, 'textDocument/hover', {
+    textDocument: { uri },
+    position: positionOf(HOVER_PROGRAM, needle, 0)
+  });
+
+  for (const [id, needle, type, initializer] of [
+    [2, 'count = 0', 'int', '0'],
+    [3, 'label = "cart"', 'string', '"cart"'],
+    [4, 'active = true', 'bool', 'true'],
+    [5, 'closed = false', 'bool', 'false']
+  ]) {
+    const result = (await hoverFor(id, needle)).result;
+    assert.match(result.contents.value, /\*\*state\*\*/);
+    assert.ok(result.contents.value.includes(`- type: \`${type}\``),
+      `${needle} reports type ${type}`);
+    assert.ok(result.contents.value.includes(`- initializer: \`${initializer}\``),
+      `${needle} reports initializer ${initializer}`);
+  }
+
+  const title = (await hoverFor(6, 'title: string')).result;
+  assert.match(title.contents.value, /\*\*model field\*\* `Item.title`/);
+  assert.match(title.contents.value, /- type: `string`/);
+  assert.deepEqual(title.range.start, positionOf(HOVER_PROGRAM, 'title: string', 0));
+
+  const idField = (await hoverFor(7, 'id: int primary')).result;
+  assert.match(idField.contents.value, /\*\*model field\*\* `Item.id` \(primary\)/);
+  assert.match(idField.contents.value, /- type: `int`/);
+
+  const unknown = await hoverFor(8, 'mystery is not');
+  assert.equal(unknown.result, null);
+  assert.equal(unknown.error, undefined);
+
+  await finish(client);
+});
+
+test('hover resolves a shared field name to the model on the cursor line', () => {
+  const program = [
+    'model User {',
+    '  id: int primary',
+    '}',
+    'model Todo {',
+    '  id: string',
+    '}',
+    ''
+  ].join('\n');
+  const document = parseDocument(program);
+
+  const user = hover(document, positionOf(program, 'id: int', 0));
+  assert.match(user.contents.value, /\*\*model field\*\* `User.id`/);
+  assert.match(user.contents.value, /- type: `int`/);
+
+  const todo = hover(document, positionOf(program, 'id: string', 0));
+  assert.match(todo.contents.value, /\*\*model field\*\* `Todo.id`/);
+  assert.match(todo.contents.value, /- type: `string`/);
 });
 
 test('initialize advertises the five new providers', async t => {
