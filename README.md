@@ -24,7 +24,7 @@ framing.
 
 | Method | Behaviour |
 | --- | --- |
-| `initialize` | Returns `textDocumentSync: 1` and the hover, completion, definition, document highlight, folding range, diagnostic, document symbol, references, rename, document formatting, code action and semantic token providers. |
+| `initialize` | Returns `textDocumentSync: 1` and the hover, completion, definition, document highlight, folding range, inlay hint, diagnostic, document symbol, references, rename, document formatting, code action and semantic token providers. |
 | `initialized` | Lifecycle acknowledgement. |
 | `shutdown` | Marks the session as shutting down. |
 | `exit` | Ends the process with code 0 when `shutdown` was seen, 1 otherwise. |
@@ -36,6 +36,7 @@ framing.
 | `textDocument/definition` | The `state` or `model` declaration line inside the same document. |
 | `textDocument/documentHighlight` | Every classified occurrence of the state name under the cursor, with `kind` 2 for the declaration and `kind` 1 for other occurrences. A cursor outside a classified state name or an unknown document URI returns `[]`. |
 | `textDocument/foldingRange` | `region` ranges for multiline brace-delimited blocks and `comment` ranges for runs of two or more consecutive comment-only lines. An unknown document URI returns `[]`. |
+| `textDocument/inlayHint` | Type hints with `kind` 1 at the end of every `state` declaration line whose initializer gives an inferred type, labelled `: int`, `: string` or `: bool`, restricted to the requested range. An unknown document URI returns `[]`. |
 | `textDocument/documentSymbol` | A hierarchical outline: the app, its states, models with fields, API paths with handlers, and the component tree with ranges and symbol kinds. |
 | `textDocument/references` | Every reference to the state name under the cursor: declaration, `{state}` interpolations, `bind:` values, conditions and action bodies. |
 | `textDocument/prepareRename` | Validates the position before `rename`. Returns the state name range and placeholder, or error `-32602` when the position is not on a declared state reference. |
@@ -65,6 +66,11 @@ occurrence.
 `textDocument/foldingRange` reports multiline brace-delimited blocks as `region`
 ranges and runs of two or more consecutive comment-only lines as `comment`
 ranges.
+
+`textDocument/inlayHint` repeats, as an `: int` / `: string` / `: bool` suffix
+hint at the end of the declaration line, the same type hover reports for that
+state. A declaration whose initializer infers no type contributes no hint, and
+only hints inside the requested range are returned.
 
 `prepareRename` is the validation gate: the cursor must land on a declared
 state name **and** on one of that state's classified occurrences. Editors call
@@ -137,9 +143,9 @@ node --test
 
 `test/lsp.test.mjs` drives the spawned server over real Content-Length framed
 JSON-RPC. It covers diagnostics, hover, completion and definition, plus a
-session for each of `foldingRange`, `documentSymbol`, `documentHighlight`,
-`references`, `prepareRename`, `rename`, `formatting`, `semanticTokens` and
-`codeAction`. A framed `documentHighlight` request asserts the declaration,
+session for each of `foldingRange`, `inlayHint`, `documentSymbol`,
+`documentHighlight`, `references`, `prepareRename`, `rename`, `formatting`,
+`semanticTokens` and `codeAction`. A framed `documentHighlight` request asserts the declaration,
 interpolation, bind value and action-body ranges and their kinds, and a
 unit-level test checks that non-state words, comments and plain string text
 return an empty array. The framed `semanticTokens` request asserts the exact
@@ -148,7 +154,10 @@ plus an empty `{ data: [] }` for an unknown URI and `-32602` for malformed
 params. A unit-level folding test covers nested blocks, single-line blocks,
 braces inside strings, consecutive comment folding and trailing comments;
 framed requests check that unknown folding and document-highlight URIs return
-empty arrays.
+empty arrays. The framed `inlayHint` request asserts the exact hints for two
+state declarations, range filtering, an empty array for an unknown URI and
+`-32602` without a range, and a unit-level test checks that a declaration with
+no inferred type contributes no hint.
 Error paths include unknown methods, malformed params, rename on a non-renameable
 position, malformed frames and a missing compiler. The formatter test formats a
 messy document, applies the returned edit, then formats again and asserts
@@ -160,12 +169,14 @@ it is built.
 ## Status
 
 The server provides diagnostics from `opuromc check`, hover, completion,
-definition, document symbols, folding ranges, document highlights, references,
+definition, document symbols, folding ranges, inlay type hints, document
+highlights, references,
 validated rename, idempotent document formatting, quick-fix code actions and
 semantic tokens.
 Framed JSON-RPC tests cover initialization, document open and change
 notifications, diagnostics and each language request; unit tests cover
-folding-range extraction and document-highlight cursor classification. Diagnostics
+folding-range extraction, inlay-hint typing and document-highlight cursor
+classification. Diagnostics
 come from the compiler; the semantic features come from the in-process parse of
 the open document. The debugger adapter protocol (DAP) is served by the separate
 `../opurom-debug` repository.

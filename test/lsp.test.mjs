@@ -14,6 +14,7 @@ import { parseDocument } from '../lib/document.mjs';
 import { NODE_KIND_NAMES } from '../lib/catalog.mjs';
 import { completion, hover } from '../lib/features.mjs';
 import { foldingRanges } from '../lib/folding.mjs';
+import { inlayHints } from '../lib/inlayhint.mjs';
 import { documentHighlights } from '../lib/highlight.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -1065,6 +1066,70 @@ test('foldingRange returns an empty array for an unknown URI', async t => {
   await finish(client);
 });
 
+test('inlayHint reports the inferred state types over JSON-RPC', async t => {
+  const client = new Client(['--compiler', stubCompiler]);
+  t.after(() => client.close());
+
+  const init = await client.request(1, 'initialize', { capabilities: {} });
+  assert.equal(init.result.capabilities.inlayHintProvider, true);
+
+  const uri = 'file://the temporary checkout-lsp-test/inlay.opu';
+  assert.deepEqual(await openDocument(client, uri, GOOD_PROGRAM), []);
+
+  const lines = GOOD_PROGRAM.split('\n');
+  const wholeDocument = {
+    start: { line: 0, character: 0 },
+    end: { line: lines.length - 1, character: lines[lines.length - 1].length }
+  };
+  const response = await client.request(2, 'textDocument/inlayHint', {
+    textDocument: { uri },
+    range: wholeDocument
+  });
+  assert.deepEqual(response.result, [
+    { position: { line: 1, character: lines[1].length }, label: ': int', kind: 1 },
+    { position: { line: 2, character: lines[2].length }, label: ': string', kind: 1 }
+  ]);
+
+  const partial = await client.request(3, 'textDocument/inlayHint', {
+    textDocument: { uri },
+    range: { start: { line: 1, character: 0 }, end: { line: 2, character: 0 } }
+  });
+  assert.deepEqual(partial.result, [
+    { position: { line: 1, character: lines[1].length }, label: ': int', kind: 1 }
+  ]);
+
+  const empty = await client.request(4, 'textDocument/inlayHint', {
+    textDocument: { uri: 'file://the temporary checkout-lsp-test/unopened-inlay.opu' },
+    range: wholeDocument
+  });
+  assert.deepEqual(empty.result, []);
+
+  const missingRange = await client.request(5, 'textDocument/inlayHint', {
+    textDocument: { uri }
+  });
+  assert.equal(missingRange.error?.code, -32602);
+
+  await finish(client);
+});
+
+test('inlayHint skips state declarations without an inferred type', () => {
+  const program = [
+    'app Counter {',
+    '  state count = 0',
+    '  state ready = true',
+    '  state alias = count',
+    '}'
+  ].join('\n');
+  const lines = program.split('\n');
+  assert.deepEqual(inlayHints(parseDocument(program), {
+    start: { line: 0, character: 0 },
+    end: { line: lines.length - 1, character: 0 }
+  }), [
+    { position: { line: 1, character: lines[1].length }, label: ': int', kind: 1 },
+    { position: { line: 2, character: lines[2].length }, label: ': bool', kind: 1 }
+  ]);
+});
+
 test('documentHighlight marks state occurrences over JSON-RPC', async t => {
   const client = new Client(['--compiler', stubCompiler]);
   t.after(() => client.close());
@@ -1187,7 +1252,11 @@ test('malformed params for every new request return InvalidParams', async t => {
     ['textDocument/codeAction', { textDocument: { uri } }],
     ['textDocument/codeAction', { textDocument: { uri }, range: { start: position } }],
     ['textDocument/semanticTokens/full', {}],
-    ['textDocument/semanticTokens/full', { textDocument: { uri: 42 } }]
+    ['textDocument/semanticTokens/full', { textDocument: { uri: 42 } }],
+    ['textDocument/inlayHint', {}],
+    ['textDocument/inlayHint', { textDocument: { uri: 42 } }],
+    ['textDocument/inlayHint', { textDocument: { uri } }],
+    ['textDocument/inlayHint', { textDocument: { uri }, range: { start: position } }]
   ];
   for (const [index, [method, params]] of requests.entries()) {
     const response = await client.request(10 + index, method, params);
@@ -1195,7 +1264,7 @@ test('malformed params for every new request return InvalidParams', async t => {
       `${method} rejects ${JSON.stringify(params)}`);
   }
 
-  const unknown = await client.request(50, 'textDocument/inlayHint', { textDocument: { uri } });
+  const unknown = await client.request(50, 'workspace/symbol', { query: '' });
   assert.equal(unknown.error.code, -32601);
 
   await finish(client);
