@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Zero-dependency Opurom language server: diagnostics, hover, completion and definition.",
+  "description": "Zero-dependency Opurom language server: diagnostics, navigation, rename, formatting and quick fixes.",
   "bin": {
     "opurom-lsp": "bin/server.mjs"
   },

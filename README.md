@@ -5,7 +5,7 @@ The Opurom language server. Zero npm dependencies — **Node builtins only**
 `vscode-languageserver` package and no install step.
 
 ```sh
-node the framework workspace/opurom-lsp/bin/server.mjs --stdio
+node opurom-lsp/bin/server.mjs --stdio
 ```
 
 The server speaks LSP over stdio with the standard `Content-Length: N\r\n\r\n<JSON>`
@@ -24,7 +24,7 @@ framing.
 
 | Method | Behaviour |
 | --- | --- |
-| `initialize` | Returns `textDocumentSync: 1`, `hoverProvider`, `completionProvider`, `definitionProvider` and `diagnosticProvider`. |
+| `initialize` | Returns `textDocumentSync: 1` and the hover, completion, definition, diagnostic, document symbol, references, rename, document formatting and code action providers. |
 | `initialized` | Lifecycle acknowledgement. |
 | `shutdown` | Marks the session as shutting down. |
 | `exit` | Ends the process with code 0 when `shutdown` was seen, 1 otherwise. |
@@ -34,9 +34,46 @@ framing.
 | `textDocument/hover` | Markdown for a state (type + initializer), a model (fields), a node kind (props) or a canonical prop. |
 | `textDocument/completion` | The 24 node kinds, keywords, canonical props, model field types, API verbs and the declared states and models. |
 | `textDocument/definition` | The `state` or `model` declaration line inside the same document. |
+| `textDocument/documentSymbol` | A hierarchical outline: the app, its states, models with fields, API paths with handlers, and the component tree with ranges and symbol kinds. |
+| `textDocument/references` | Every reference to the state name under the cursor: declaration, `{state}` interpolations, `bind:` values, conditions and action bodies. |
+| `textDocument/prepareRename` | Validates the position before `rename`. Returns the state name range and placeholder, or error `-32602` when the position is not on a declared state reference. |
+| `textDocument/rename` | A `WorkspaceEdit` replacing every occurrence of a state name. Rejects invalid identifiers, keywords, existing state names and non-renameable positions with `-32602`. |
+| `textDocument/formatting` | A whole-document `TextEdit` that normalises indentation to two spaces, braces and token spacing. Idempotent. |
+| `textDocument/codeAction` | Quick fixes for the compiler's `unknown state` diagnostic when the compiler's `help:` line makes the edit unambiguous. |
 
-Unknown methods answer with JSON-RPC error `-32601`. A malformed frame answers
-with parse error `-32700` and the process stays alive.
+Unknown methods answer with JSON-RPC error `-32601`. Malformed params for a
+request answer with `-32602`. A malformed frame answers with parse error
+`-32700` and the process stays alive. The contract is defined in
+[the LSP scope contract](../opurom-examples/golden/the LSP scope contract) and
+[the integration extensions](../opurom-examples/golden/the integration extensions).
+
+## Semantic features
+
+All semantic features are derived from the in-process parse of the open
+document. The parser keeps each token's source position, the raw text of string
+literals and the position of every `{state}` interpolation, so references and
+rename work inside strings and action bodies without guessing at words in
+comments or plain string text.
+
+`prepareRename` is the validation gate: the cursor must land on a declared
+state name **and** on one of that state's classified occurrences. Editors call
+it before committing a rename, and the error response makes them refuse the
+operation. `rename` returns one `TextEdit` per occurrence with the same range
+that `references` reports.
+
+`textDocument/formatting` re-emits the token stream rather than adjusting the
+original whitespace. Every `{` ends a line, every `}` starts one, an empty
+block stays on one line, and spacing depends only on the neighbouring token
+kinds. Because the emitted layout obeys the same rules on a second pass,
+formatting an already-formatted document returns identical text. Comments,
+string literals and single blank lines are preserved.
+
+`textDocument/codeAction` offers a fix only for the compiler's friendly
+`unknown state` diagnostic. It inserts the exact declaration the compiler's
+`help:` line recommends after the last app-level `state` declaration, and —
+only when the compiler names exactly one existing state as an alternative —
+offers to replace the offending name with it. Unknown kinds, type mismatches,
+duplicate names and ambiguous candidate lists yield an empty action list.
 
 ## Diagnostics
 
@@ -53,8 +90,8 @@ a 0-based range that widens the reported character to the token that starts ther
 and a message whose second line is the `help:` text.
 
 If the compiler binary is missing, the server emits **one** `window/showMessage`
-warning, publishes empty diagnostics and keeps serving hover, completion and
-definition. It never crashes on a missing tool.
+warning, publishes empty diagnostics and keeps serving every document feature.
+It never crashes on a missing tool.
 
 ## Point VS Code at it
 
@@ -64,7 +101,7 @@ editor), set the path in the extension settings:
 
 ```json
 {
-  "opurom.lspPath": "the framework workspace/opurom-lsp/bin/server.mjs"
+  "opurom.lspPath": "/absolute/path/to/opurom-lsp/bin/server.mjs"
 }
 ```
 
@@ -74,26 +111,26 @@ framing to it.
 ## Tests
 
 ```sh
-cd the framework workspace/opurom-lsp
+cd opurom-lsp
 node --test
 ```
 
-`test/lsp.test.mjs` runs a real JSON-RPC session (initialize → initialized →
-didOpen with a bad program → diagnostics → didChange → hover → completion →
-definition → unknown method → shutdown → exit) against the spawned server, using
-the stub compiler in `fixtures/` so the suite is self-contained. A second test
-repeats the diagnostics check with the real `opuromc` when it is built, and is
-skipped otherwise. A third test proves that a malformed frame is answered with a
-parse error while the server stays alive, and a fourth proves that a missing
-compiler warns exactly once.
+`test/lsp.test.mjs` drives the spawned server over real Content-Length framed
+JSON-RPC. It covers diagnostics, hover, completion and definition, plus a
+session for each of `documentSymbol`, `references`, `prepareRename`, `rename`,
+`formatting` and `codeAction`. Error paths include unknown methods, malformed
+params, rename on a non-renameable position, malformed frames and a missing
+compiler. The formatter test formats a messy document, applies the returned
+edit, then formats again and asserts identical output. Code-action tests apply
+each returned edit and assert the compiler's diagnostics clear. The suite uses
+the stub compiler in `fixtures/` so it is self-contained, and runs additional
+checks against the real `opuromc` when it is built.
 
-## Honest status
+## Status
 
-Verified in this round: diagnostics from `opuromc check`, hover, completion and
-definition. The semantic features are derived from a lightweight in-process parse
-of the open document, not from the compiler's IR, so they describe what the
-document declares rather than what the compiler will lower.
-
-Not implemented (initial release+): formatting, rename, references, code actions,
-semantic tokens, workspace symbols, and the debugger adapter protocol (DAP).
-There is no JetBrains plugin and no profiler view yet.
+Verified: diagnostics from `opuromc check`, hover, completion, definition,
+document symbols, references, validated rename, idempotent document formatting
+and quick-fix code actions. Every method is exercised by a framed JSON-RPC
+test. Diagnostics come from the compiler; the semantic features come from the
+in-process parse of the open document. The debugger adapter protocol (DAP) is
+served by the separate `../opurom-debug` repository.

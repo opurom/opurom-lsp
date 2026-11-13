@@ -5,7 +5,10 @@
 // `check <file>` prints `path:line:col: error: message` plus a `help:` line
 // on stderr and exits 1, or exits 0 with no output for a valid file.
 //
-// A file is "invalid" when it contains the marker `OPAQUE_BAD_STATE`.
+// A file is "invalid" when it contains the marker `OPAQUE_BAD_STATE` or an
+// interpolation of the undeclared state `nope`. The latter uses the real
+// compiler's message and help text so quick-fix tests can apply the returned
+// edits and check that the resulting document passes `check`.
 import { readFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -29,6 +32,16 @@ if (badIndex !== -1) {
   const column = lines[badIndex].indexOf('OPAQUE_BAD_STATE') + 1;
   process.stderr.write(
     `${file}:${badIndex + 1}:${column}: error: unknown state 'nope' in Text interpolation\n` +
+    "  help: declare it with 'state nope = 0' or use one of: count\n"
+  );
+  process.exit(1);
+}
+
+const nopeIndex = lines.findIndex(line => line.includes('{nope}'));
+if (nopeIndex !== -1 && !/\bstate\s+nope\s*=/.test(text)) {
+  const column = lines[nopeIndex].indexOf('{nope}') + 2;
+  process.stderr.write(
+    `${file}:${nopeIndex + 1}:${column}: error: unknown state 'nope' in Text interpolation\n` +
     "  help: declare it with 'state nope = 0' or use one of: count\n"
   );
   process.exit(1);
