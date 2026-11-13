@@ -24,7 +24,7 @@ framing.
 
 | Method | Behaviour |
 | --- | --- |
-| `initialize` | Returns `textDocumentSync: 1` and the hover, completion, definition, document highlight, folding range, diagnostic, document symbol, references, rename, document formatting and code action providers. |
+| `initialize` | Returns `textDocumentSync: 1` and the hover, completion, definition, document highlight, folding range, diagnostic, document symbol, references, rename, document formatting, code action and semantic token providers. |
 | `initialized` | Lifecycle acknowledgement. |
 | `shutdown` | Marks the session as shutting down. |
 | `exit` | Ends the process with code 0 when `shutdown` was seen, 1 otherwise. |
@@ -42,6 +42,7 @@ framing.
 | `textDocument/rename` | A `WorkspaceEdit` replacing every occurrence of a state name. Rejects invalid identifiers, keywords, existing state names and non-renameable positions with `-32602`. |
 | `textDocument/formatting` | A whole-document `TextEdit` that normalises indentation to two spaces, braces and token spacing. Idempotent. |
 | `textDocument/codeAction` | Quick fixes for the compiler's `unknown state` diagnostic when the compiler's `help:` line makes the edit unambiguous. |
+| `textDocument/semanticTokens/full` | Delta-encoded `data` with a legend of `state`, `model`, `apiPath` and `nodeKind`, advertised through the `initialize` capabilities. State occurrences reuse the reference classifier, model names cover declarations and api handlers, api paths are the api declaration strings and node kinds are the `Kind(`/`Kind {` uses the parse records. An unknown URI returns `{ data: [] }`. |
 
 Unknown methods answer with JSON-RPC error `-32601`. Malformed params for a
 request answer with `-32602`. A malformed frame answers with parse error
@@ -84,6 +85,15 @@ string literals and single blank lines are preserved.
 only when the compiler names exactly one existing state as an alternative —
 offers to replace the offending name with it. Unknown kinds, type mismatches,
 duplicate names and ambiguous candidate lists yield an empty action list.
+
+`textDocument/semanticTokens/full` classifies a document through the same
+parse the other features use and emits delta-encoded tokens per the LSP contract.
+The legend in the `initialize` capabilities lists exactly the four types the
+classifier produces — `state`, `model`, `apiPath` and `nodeKind` — so editors
+colour what the compiler sees: every occurrence the reference classifier
+reports for a declared state, model names in declarations and api handlers,
+api path strings and node-kind uses. Words in comments and plain string text
+stay unmarked.
 
 ## Diagnostics
 
@@ -128,13 +138,17 @@ node --test
 `test/lsp.test.mjs` drives the spawned server over real Content-Length framed
 JSON-RPC. It covers diagnostics, hover, completion and definition, plus a
 session for each of `foldingRange`, `documentSymbol`, `documentHighlight`,
-`references`, `prepareRename`, `rename`, `formatting` and `codeAction`. A
-framed `documentHighlight` request asserts the declaration, interpolation, bind
-value and action-body ranges and their kinds, and a unit-level test checks that
-non-state words, comments and plain string text return an empty array. A
-unit-level folding test covers nested blocks, single-line blocks, braces inside
-strings, consecutive comment folding and trailing comments; framed requests
-check that unknown folding and document-highlight URIs return empty arrays.
+`references`, `prepareRename`, `rename`, `formatting`, `semanticTokens` and
+`codeAction`. A framed `documentHighlight` request asserts the declaration,
+interpolation, bind value and action-body ranges and their kinds, and a
+unit-level test checks that non-state words, comments and plain string text
+return an empty array. The framed `semanticTokens` request asserts the exact
+delta-encoded `data` for a document containing every classified token type,
+plus an empty `{ data: [] }` for an unknown URI and `-32602` for malformed
+params. A unit-level folding test covers nested blocks, single-line blocks,
+braces inside strings, consecutive comment folding and trailing comments;
+framed requests check that unknown folding and document-highlight URIs return
+empty arrays.
 Error paths include unknown methods, malformed params, rename on a non-renameable
 position, malformed frames and a missing compiler. The formatter test formats a
 messy document, applies the returned edit, then formats again and asserts
@@ -147,7 +161,8 @@ it is built.
 
 The server provides diagnostics from `opuromc check`, hover, completion,
 definition, document symbols, folding ranges, document highlights, references,
-validated rename, idempotent document formatting and quick-fix code actions.
+validated rename, idempotent document formatting, quick-fix code actions and
+semantic tokens.
 Framed JSON-RPC tests cover initialization, document open and change
 notifications, diagnostics and each language request; unit tests cover
 folding-range extraction and document-highlight cursor classification. Diagnostics

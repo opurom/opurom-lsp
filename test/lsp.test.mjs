@@ -233,6 +233,27 @@ const HOVER_PROGRAM = [
   ''
 ].join('\n');
 
+// One occurrence of every classified token type: the state declaration and
+// action body, the model name in its declaration and in an api handler, the
+// api path string, the node kinds and the `{count}` interpolation. The line
+// 9 string is a plain literal, so the api path is the only marked string.
+const SEMANTIC_PROGRAM = [
+  'app Counter {',
+  '  state count = 0',
+  '  model Todo {',
+  '    id: int primary',
+  '  }',
+  '  api "/todos" {',
+  '    list Todo',
+  '  }',
+  '  Column(gap: 8) {',
+  '    Text("Count: {count}")',
+  '    Button("+") { count += 1 }',
+  '  }',
+  '}',
+  ''
+].join('\n');
+
 function offsetAt(text, position) {
   const lines = text.split('\n');
   let offset = 0;
@@ -588,12 +609,12 @@ test('initialize advertises the five new providers', async t => {
   assert.deepEqual(caps.renameProvider, { prepareProvider: true });
   assert.equal(caps.documentFormattingProvider, true);
   assert.equal(caps.codeActionProvider, true);
+  assert.deepEqual(caps.semanticTokensProvider, {
+    legend: { tokenTypes: ['state', 'model', 'apiPath', 'nodeKind'] },
+    full: true
+  });
   assert.equal(caps.hoverProvider, true);
   assert.equal(caps.textDocumentSync, 1);
-
-  const unknown = await client.request(2, 'textDocument/semanticTokens/full', {});
-  assert.equal(unknown.error.code, -32601);
-  assert.match(unknown.error.message, /semanticTokens/);
 
   await finish(client);
 });
@@ -1030,6 +1051,50 @@ test('documentHighlight returns an empty array for an unknown URI', async t => {
   await finish(client);
 });
 
+test('semanticTokens returns delta-encoded compiler-accurate tokens', async t => {
+  const client = new Client(['--compiler', stubCompiler]);
+  t.after(() => client.close());
+
+  const init = await client.request(1, 'initialize', { capabilities: {} });
+  assert.deepEqual(init.result.capabilities.semanticTokensProvider, {
+    legend: { tokenTypes: ['state', 'model', 'apiPath', 'nodeKind'] },
+    full: true
+  });
+
+  const uri = 'file://the temporary checkout-lsp-test/tokens.opu';
+  assert.deepEqual(await openDocument(client, uri, SEMANTIC_PROGRAM), []);
+
+  const response = await client.request(2, 'textDocument/semanticTokens/full', {
+    textDocument: { uri }
+  });
+  // Delta-encoded per the LSP contract: [deltaLine, startChar, length, tokenType,
+  // modifiers] with tokenType indexing the advertised legend.
+  assert.deepEqual(response.result, {
+    data: [
+      1, 8, 5, 0, 0,  // count declaration: state
+      1, 8, 4, 1, 0,  // Todo declaration: model
+      3, 6, 8, 2, 0,  // "/todos": apiPath
+      1, 9, 4, 1, 0,  // Todo in `list Todo`: model
+      2, 2, 6, 3, 0,  // Column: nodeKind
+      1, 4, 4, 3, 0,  // Text: nodeKind
+      0, 14, 5, 0, 0, // {count} interpolation: state
+      1, 4, 6, 3, 0,  // Button: nodeKind
+      0, 14, 5, 0, 0  // count in the action body: state
+    ]
+  });
+
+  const empty = await client.request(3, 'textDocument/semanticTokens/full', {
+    textDocument: { uri: 'file://the temporary checkout-lsp-test/unopened-tokens.opu' }
+  });
+  assert.deepEqual(empty.result, { data: [] });
+
+  const malformed = await client.request(4, 'textDocument/semanticTokens/full', {});
+  assert.equal(malformed.error?.code, -32602);
+  assert.match(malformed.error.message, /textDocument\.uri/);
+
+  await finish(client);
+});
+
 test('malformed params for every new request return InvalidParams', async t => {
   const client = new Client(['--compiler', stubCompiler]);
   t.after(() => client.close());
@@ -1055,7 +1120,9 @@ test('malformed params for every new request return InvalidParams', async t => {
     ['textDocument/rename', { textDocument: { uri }, position, newName: 'not valid' }],
     ['textDocument/formatting', {}],
     ['textDocument/codeAction', { textDocument: { uri } }],
-    ['textDocument/codeAction', { textDocument: { uri }, range: { start: position } }]
+    ['textDocument/codeAction', { textDocument: { uri }, range: { start: position } }],
+    ['textDocument/semanticTokens/full', {}],
+    ['textDocument/semanticTokens/full', { textDocument: { uri: 42 } }]
   ];
   for (const [index, [method, params]] of requests.entries()) {
     const response = await client.request(10 + index, method, params);
