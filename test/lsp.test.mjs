@@ -10,6 +10,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseDocument } from '../lib/document.mjs';
+import { foldingRanges } from '../lib/folding.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -179,6 +181,20 @@ const ACTION_PROGRAM = [
   '  state count = 0',
   '  Column(gap: 8) {',
   '    Text("Count: {nope}")',
+  '  }',
+  '}',
+  ''
+].join('\n');
+
+const FOLDING_PROGRAM = [
+  '// A comment with { braces }',
+  '// The second comment line',
+  'app Counter {',
+  '  state count = 0',
+  '  Column(gap: 8) {',
+  '    Text("Count: {count}")',
+  '    Text("literal { } braces")',
+  '    Button("+") { count += 1 }',
   '  }',
   '}',
   ''
@@ -811,6 +827,60 @@ test('codeAction returns no fix for ambiguous or unsupported diagnostics', async
   await finish(client);
 });
 
+test('foldingRange reports nested blocks and comments over JSON-RPC', async t => {
+  const client = new Client(['--compiler', stubCompiler]);
+  t.after(() => client.close());
+
+  const init = await client.request(1, 'initialize', { capabilities: {} });
+  assert.equal(init.result.capabilities.foldingRangeProvider, true);
+
+  const uri = 'file://the temporary checkout-lsp-test/folding.opu';
+  assert.deepEqual(await openDocument(client, uri, FOLDING_PROGRAM), []);
+
+  const response = await client.request(2, 'textDocument/foldingRange', {
+    textDocument: { uri }
+  });
+  const expected = [
+    { startLine: 0, endLine: 1, kind: 'comment' },
+    { startLine: 2, endLine: 9, kind: 'region' },
+    { startLine: 4, endLine: 8, kind: 'region' }
+  ];
+  assert.ok(response.result.some(range =>
+    range.startLine === 2 && range.endLine === 9 && range.kind === 'region'),
+  'folding includes the app block');
+  assert.deepEqual(response.result, expected);
+
+  await finish(client);
+});
+
+test('foldingRanges ignores single lines and braces inside strings', () => {
+  assert.deepEqual(foldingRanges(parseDocument(FOLDING_PROGRAM)), [
+    { startLine: 0, endLine: 1, kind: 'comment' },
+    { startLine: 2, endLine: 9, kind: 'region' },
+    { startLine: 4, endLine: 8, kind: 'region' }
+  ]);
+
+  const trailingComments = [
+    'state count = 0 // trailing comment',
+    '// standalone comment',
+    ''
+  ].join('\n');
+  assert.deepEqual(foldingRanges(parseDocument(trailingComments)), []);
+});
+
+test('foldingRange returns an empty array for an unknown URI', async t => {
+  const client = new Client(['--compiler', stubCompiler]);
+  t.after(() => client.close());
+
+  await client.request(1, 'initialize', { capabilities: {} });
+  const response = await client.request(2, 'textDocument/foldingRange', {
+    textDocument: { uri: 'file://the temporary checkout-lsp-test/unopened.opu' }
+  });
+  assert.deepEqual(response.result, []);
+
+  await finish(client);
+});
+
 test('malformed params for every new request return InvalidParams', async t => {
   const client = new Client(['--compiler', stubCompiler]);
   t.after(() => client.close());
@@ -820,6 +890,7 @@ test('malformed params for every new request return InvalidParams', async t => {
   assert.deepEqual(await openDocument(client, uri, GOOD_PROGRAM), []);
   const position = { line: 1, character: 8 };
   const requests = [
+    ['textDocument/foldingRange', {}],
     ['textDocument/documentSymbol', {}],
     ['textDocument/documentSymbol', { textDocument: { uri: 42 } }],
     ['textDocument/references', { textDocument: { uri } }],

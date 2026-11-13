@@ -24,7 +24,7 @@ framing.
 
 | Method | Behaviour |
 | --- | --- |
-| `initialize` | Returns `textDocumentSync: 1` and the hover, completion, definition, diagnostic, document symbol, references, rename, document formatting and code action providers. |
+| `initialize` | Returns `textDocumentSync: 1` and the hover, completion, definition, folding range, diagnostic, document symbol, references, rename, document formatting and code action providers. |
 | `initialized` | Lifecycle acknowledgement. |
 | `shutdown` | Marks the session as shutting down. |
 | `exit` | Ends the process with code 0 when `shutdown` was seen, 1 otherwise. |
@@ -34,6 +34,7 @@ framing.
 | `textDocument/hover` | Markdown for a state (type + initializer), a model (fields), a node kind (props) or a canonical prop. |
 | `textDocument/completion` | The 24 node kinds, keywords, canonical props, model field types, API verbs and the declared states and models. |
 | `textDocument/definition` | The `state` or `model` declaration line inside the same document. |
+| `textDocument/foldingRange` | `region` ranges for multiline brace-delimited blocks and `comment` ranges for runs of two or more consecutive comment-only lines. An unknown document URI returns `[]`. |
 | `textDocument/documentSymbol` | A hierarchical outline: the app, its states, models with fields, API paths with handlers, and the component tree with ranges and symbol kinds. |
 | `textDocument/references` | Every reference to the state name under the cursor: declaration, `{state}` interpolations, `bind:` values, conditions and action bodies. |
 | `textDocument/prepareRename` | Validates the position before `rename`. Returns the state name range and placeholder, or error `-32602` when the position is not on a declared state reference. |
@@ -54,6 +55,10 @@ document. The parser keeps each token's source position, the raw text of string
 literals and the position of every `{state}` interpolation, so references and
 rename work inside strings and action bodies without guessing at words in
 comments or plain string text.
+
+`textDocument/foldingRange` reports multiline brace-delimited blocks as `region`
+ranges and runs of two or more consecutive comment-only lines as `comment`
+ranges.
 
 `prepareRename` is the validation gate: the cursor must land on a declared
 state name **and** on one of that state's classified occurrences. Editors call
@@ -117,20 +122,25 @@ node --test
 
 `test/lsp.test.mjs` drives the spawned server over real Content-Length framed
 JSON-RPC. It covers diagnostics, hover, completion and definition, plus a
-session for each of `documentSymbol`, `references`, `prepareRename`, `rename`,
-`formatting` and `codeAction`. Error paths include unknown methods, malformed
-params, rename on a non-renameable position, malformed frames and a missing
-compiler. The formatter test formats a messy document, applies the returned
-edit, then formats again and asserts identical output. Code-action tests apply
-each returned edit and assert the compiler's diagnostics clear. The suite uses
-the stub compiler in `fixtures/` so it is self-contained, and runs additional
-checks against the real `opuromc` when it is built.
+session for each of `foldingRange`, `documentSymbol`, `references`,
+`prepareRename`, `rename`, `formatting` and `codeAction`. A unit-level folding
+test covers nested blocks, single-line blocks, braces inside strings,
+consecutive comment folding and trailing comments, and a framed request checks
+that an unknown folding URI returns an empty array. Error paths include unknown
+methods, malformed params, rename on a non-renameable position, malformed frames
+and a missing compiler. The formatter test formats a messy document, applies the
+returned edit, then formats again and asserts identical output. Code-action tests
+apply each returned edit and assert the compiler's diagnostics clear. The suite
+uses the stub compiler in `fixtures/` so it is self-contained, and runs
+additional checks against the real `opuromc` when it is built.
 
 ## Status
 
-Verified: diagnostics from `opuromc check`, hover, completion, definition,
-document symbols, references, validated rename, idempotent document formatting
-and quick-fix code actions. Every method is exercised by a framed JSON-RPC
-test. Diagnostics come from the compiler; the semantic features come from the
-in-process parse of the open document. The debugger adapter protocol (DAP) is
-served by the separate `../opurom-debug` repository.
+The server provides diagnostics from `opuromc check`, hover, completion,
+definition, document symbols, folding ranges, references, validated rename,
+idempotent document formatting and quick-fix code actions. Framed JSON-RPC tests
+cover initialization, document open and change notifications, diagnostics and
+each language request; a unit test covers folding-range extraction. Diagnostics
+come from the compiler; the semantic features come from the in-process parse of
+the open document. The debugger adapter protocol (DAP) is served by the separate
+`../opurom-debug` repository.
