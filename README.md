@@ -32,7 +32,7 @@ framing.
 | `textDocument/didChange` | Same as `didOpen` for the new text. |
 | `textDocument/didClose` | Drops the document and clears its diagnostics. |
 | `textDocument/hover` | Markdown for a state (type + initializer), a model (fields), a model field (declared type), a node kind (props) or a canonical prop. An unknown word returns `null`. |
-| `textDocument/completion` | The 24 node kinds, keywords, canonical props, model field types, API verbs and the declared states and models. |
+| `textDocument/completion` | Inside `Kind(` parens, the attributes that node kind accepts, each with a short `documentation` string. Elsewhere, the 24 node kinds, keywords, canonical props, model field types, API verbs and the declared states and models. |
 | `textDocument/definition` | The `state` or `model` declaration line inside the same document. |
 | `textDocument/documentHighlight` | Every classified occurrence of the state name under the cursor, with `kind` 2 for the declaration and `kind` 1 for other occurrences. A cursor outside a classified state name or an unknown document URI returns `[]`. |
 | `textDocument/foldingRange` | `region` ranges for multiline brace-delimited blocks and `comment` ranges for runs of two or more consecutive comment-only lines. An unknown document URI returns `[]`. |

@@ -11,7 +11,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument } from '../lib/document.mjs';
-import { hover } from '../lib/features.mjs';
+import { NODE_KIND_NAMES } from '../lib/catalog.mjs';
+import { completion, hover } from '../lib/features.mjs';
 import { foldingRanges } from '../lib/folding.mjs';
 import { documentHighlights } from '../lib/highlight.mjs';
 
@@ -529,6 +530,70 @@ test('a full-stack document exposes model fields and api paths', async t => {
   await client.request(5, 'shutdown', null);
   await client.notification('exit', null);
   assert.equal(await client.exited, 0);
+});
+
+test('completion offers catalog attributes inside node parens', async t => {
+  const client = new Client(['--compiler', stubCompiler]);
+  t.after(() => client.close());
+  await client.request(1, 'initialize', { capabilities: {} });
+
+  const uri = 'file://the temporary checkout-lsp-test/attributes.opu';
+  const program = [
+    'app Shop {',
+    '  Button(',
+    '  Column(',
+    '}',
+    ''
+  ].join('\n');
+  assert.deepEqual(await openDocument(client, uri, program), []);
+
+  const button = await client.request(2, 'textDocument/completion', {
+    textDocument: { uri },
+    position: positionOf(program, 'Button(', 'Button('.length)
+  });
+  assert.deepEqual(button.result.items.map(entry => entry.label), ['label']);
+  assert.equal(button.result.items[0].detail, 'Button attribute');
+  assert.match(button.result.items[0].documentation, /Button attribute `label`/);
+
+  const column = await client.request(3, 'textDocument/completion', {
+    textDocument: { uri },
+    position: positionOf(program, 'Column(', 'Column('.length)
+  });
+  assert.deepEqual(column.result.items.map(entry => entry.label),
+    ['gap', 'padding', 'align', 'width']);
+  for (const entry of column.result.items) {
+    assert.equal(typeof entry.documentation, 'string');
+    assert.match(entry.documentation, /Column attribute `/);
+  }
+
+  const outside = await client.request(4, 'textDocument/completion', {
+    textDocument: { uri },
+    position: positionOf(program, 'app Shop', 0)
+  });
+  const labels = outside.result.items.map(entry => entry.label);
+  for (const name of NODE_KIND_NAMES) {
+    assert.ok(labels.includes(name), `completion outside a node offers ${name}`);
+  }
+  assert.ok(labels.includes('app'));
+  assert.ok(!labels.includes('label'));
+  assert.ok(outside.result.items.every(entry =>
+    typeof entry.documentation === 'string' && entry.documentation.length > 0));
+
+  await finish(client);
+});
+
+test('completion leaves node parens at the closing paren', () => {
+  const text = 'Button(label: "Column(")\nColumn(';
+  const document = parseDocument(text);
+  assert.deepEqual(
+    completion(document, { line: 0, character: 7 }).items.map(entry => entry.label),
+    ['label']
+  );
+  const closed = completion(document, { line: 0, character: text.indexOf('\n') });
+  assert.ok(closed.items.some(entry => entry.label === 'Column'));
+  assert.ok(!closed.items.some(entry => entry.label === 'label'));
+  const quoted = completion(parseDocument('Text("(")\n'), { line: 0, character: 9 });
+  assert.ok(quoted.items.some(entry => entry.label === 'Column'));
 });
 
 test('hover reports state types, model field types and nothing for unknown words', async t => {
