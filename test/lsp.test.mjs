@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument } from '../lib/document.mjs';
 import { NODE_KIND_NAMES } from '../lib/catalog.mjs';
-import { completion, hover } from '../lib/features.mjs';
+import { completion, hover, signatureHelp } from '../lib/features.mjs';
 import { foldingRanges } from '../lib/folding.mjs';
 import { inlayHints } from '../lib/inlayhint.mjs';
 import { documentHighlights } from '../lib/highlight.mjs';
@@ -680,6 +680,8 @@ test('initialize advertises the five new providers', async t => {
     full: true
   });
   assert.equal(caps.hoverProvider, true);
+  assert.ok(caps.signatureHelpProvider);
+  assert.deepEqual(caps.signatureHelpProvider.triggerCharacters, ['(', ',']);
   assert.equal(caps.textDocumentSync, 1);
 
   await finish(client);
@@ -1294,3 +1296,76 @@ test('quick fixes from the real opuromc clear its diagnostics',
 
     await finish(client);
   });
+
+test('signatureHelp lists node-kind props and tracks the typed attribute', async t => {
+  const client = new Client(['--compiler', stubCompiler]);
+  t.after(() => client.close());
+  await client.request(1, 'initialize', { capabilities: {} });
+
+  const uri = 'file://the temporary checkout-lsp-test/signature.opu';
+  const program = [
+    'app Shop {',
+    '  Column(gap: 8, padding: 4) {',
+    '  }',
+    '}',
+    ''
+  ].join('\n');
+  assert.deepEqual(await openDocument(client, uri, program), []);
+
+  const insideColumn = await client.request(2, 'textDocument/signatureHelp', {
+    textDocument: { uri },
+    position: positionOf(program, 'Column(', 'Column(gap'.length)
+  });
+  const help = insideColumn.result;
+  assert.equal(help.activeSignature, 0);
+  assert.equal(help.signatures.length, 1);
+  const signature = help.signatures[0];
+  assert.equal(signature.label, 'Column(gap, padding, align, width)');
+  assert.deepEqual(signature.parameters.map(entry => entry.label),
+    ['gap', 'padding', 'align', 'width']);
+  assert.match(signature.documentation.value, /Column/);
+  // The caret sits on `gap`, which is the first prop.
+  assert.equal(help.activeParameter, 0);
+
+  const onPadding = await client.request(3, 'textDocument/signatureHelp', {
+    textDocument: { uri },
+    position: positionOf(program, 'padding', 'padding'.length)
+  });
+  assert.equal(onPadding.result.activeParameter, 1);
+
+  const outside = await client.request(4, 'textDocument/signatureHelp', {
+    textDocument: { uri },
+    position: positionOf(program, 'app Shop', 0)
+  });
+  assert.equal(outside.result, null);
+
+  const unknown = await client.request(5, 'textDocument/signatureHelp', {
+    textDocument: { uri: 'file://the temporary checkout-lsp-test/absent.opu' },
+    position: { line: 0, character: 0 }
+  });
+  assert.equal(unknown.result, null);
+
+  const missingUri = await client.request(6, 'textDocument/signatureHelp', {
+    position: { line: 0, character: 0 }
+  });
+  assert.equal(missingUri.error.code, -32602);
+  const badPosition = await client.request(7, 'textDocument/signatureHelp', {
+    textDocument: { uri },
+    position: { line: -1, character: 0 }
+  });
+  assert.equal(badPosition.error.code, -32602);
+
+  await finish(client);
+});
+
+test('signatureHelp classifies the innermost node kind with the shared classifier', () => {
+  const text = 'Column(gap: 8) {\n  Row(padding: 1, ';
+  const document = parseDocument(text);
+  const row = signatureHelp(document, { line: 1, character: text.split('\n')[1].length });
+  assert.equal(row.signatures[0].label, 'Row(gap, padding, align, width)');
+  // After `padding: 1, ` no catalog word is under the caret, so the first prop is active.
+  assert.equal(row.activeParameter, 0);
+  const nested = signatureHelp(document, { line: 1, character: '  Row(padding'.length });
+  assert.equal(nested.activeParameter, 1);
+  assert.equal(signatureHelp(document, { line: 0, character: 0 }), null);
+});

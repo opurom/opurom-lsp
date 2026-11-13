@@ -24,7 +24,7 @@ framing.
 
 | Method | Behaviour |
 | --- | --- |
-| `initialize` | Returns `textDocumentSync: 1` and the hover, completion, definition, document highlight, folding range, inlay hint, diagnostic, document symbol, references, rename, document formatting, code action and semantic token providers. |
+| `initialize` | Returns `textDocumentSync: 1` and the hover, completion, signature help, definition, document highlight, folding range, inlay hint, diagnostic, document symbol, references, rename, document formatting, code action and semantic token providers. |
 | `initialized` | Lifecycle acknowledgement. |
 | `shutdown` | Marks the session as shutting down. |
 | `exit` | Ends the process with code 0 when `shutdown` was seen, 1 otherwise. |
@@ -33,6 +33,7 @@ framing.
 | `textDocument/didClose` | Drops the document and clears its diagnostics. |
 | `textDocument/hover` | Markdown for a state (type + initializer), a model (fields), a model field (declared type), a node kind (props) or a canonical prop. An unknown word returns `null`. |
 | `textDocument/completion` | Inside `Kind(` parens, the attributes that node kind accepts, each with a short `documentation` string. Elsewhere, the 24 node kinds, keywords, canonical props, model field types, API verbs and the declared states and models. |
+| `textDocument/signatureHelp` | The prop list of the node kind whose `Kind(` parens enclose the cursor, as one signature labelled `Kind(prop, ...)` with a parameter per prop. `activeParameter` is the index of the prop name under the cursor, or `0`. Outside any node parens or for an unknown URI it returns `null`. |
 | `textDocument/definition` | The `state` or `model` declaration line inside the same document. |
 | `textDocument/documentHighlight` | Every classified occurrence of the state name under the cursor, with `kind` 2 for the declaration and `kind` 1 for other occurrences. A cursor outside a classified state name or an unknown document URI returns `[]`. |
 | `textDocument/foldingRange` | `region` ranges for multiline brace-delimited blocks and `comment` ranges for runs of two or more consecutive comment-only lines. An unknown document URI returns `[]`. |
@@ -142,7 +143,7 @@ node --test
 ```
 
 `test/lsp.test.mjs` drives the spawned server over real Content-Length framed
-JSON-RPC. It covers diagnostics, hover, completion and definition, plus a
+JSON-RPC. It covers diagnostics, hover, completion, signature help and definition, plus a
 session for each of `foldingRange`, `inlayHint`, `documentSymbol`,
 `documentHighlight`, `references`, `prepareRename`, `rename`, `formatting`,
 `semanticTokens` and `codeAction`. A framed `documentHighlight` request asserts the declaration,
@@ -169,7 +170,7 @@ it is built.
 ## Status
 
 The server provides diagnostics from `opuromc check`, hover, completion,
-definition, document symbols, folding ranges, inlay type hints, document
+definition, signature help, document symbols, folding ranges, inlay type hints, document
 highlights, references,
 validated rename, idempotent document formatting, quick-fix code actions and
 semantic tokens.
