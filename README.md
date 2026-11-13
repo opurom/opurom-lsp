@@ -49,8 +49,8 @@ framing.
 Unknown methods answer with JSON-RPC error `-32601`. Malformed params for a
 request answer with `-32602`. A malformed frame answers with parse error
 `-32700` and the process stays alive. The contract is defined in
-[the LSP scope contract](../opurom-examples/golden/the LSP scope contract) and
-[the integration extensions](../opurom-examples/golden/the integration extensions).
+[the LSP scope contract](the LSP scope contract) and
+[the integration extensions](the integration extensions).
 
 ## Semantic features
 
