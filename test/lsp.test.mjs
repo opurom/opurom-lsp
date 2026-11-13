@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument } from '../lib/document.mjs';
 import { foldingRanges } from '../lib/folding.mjs';
+import { documentHighlights } from '../lib/highlight.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -194,6 +195,19 @@ const FOLDING_PROGRAM = [
   '  Column(gap: 8) {',
   '    Text("Count: {count}")',
   '    Text("literal { } braces")',
+  '    Button("+") { count += 1 }',
+  '  }',
+  '}',
+  ''
+].join('\n');
+
+const HIGHLIGHT_PROGRAM = [
+  '// count is a plain comment',
+  'app Counter {',
+  '  state count = 0',
+  '  Column(gap: 8) {',
+  '    Text("Count: {count} and plain count")',
+  '    Input(placeholder: "Your count", bind: count)',
   '    Button("+") { count += 1 }',
   '  }',
   '}',
@@ -881,6 +895,57 @@ test('foldingRange returns an empty array for an unknown URI', async t => {
   await finish(client);
 });
 
+test('documentHighlight marks state occurrences over JSON-RPC', async t => {
+  const client = new Client(['--compiler', stubCompiler]);
+  t.after(() => client.close());
+
+  const init = await client.request(1, 'initialize', { capabilities: {} });
+  assert.equal(init.result.capabilities.documentHighlightProvider, true);
+
+  const uri = 'file://the temporary checkout-lsp-test/highlight.opu';
+  assert.deepEqual(await openDocument(client, uri, HIGHLIGHT_PROGRAM), []);
+
+  const response = await client.request(2, 'textDocument/documentHighlight', {
+    textDocument: { uri },
+    position: positionOf(HIGHLIGHT_PROGRAM, '{count}', 1)
+  });
+  assert.deepEqual(response.result, [
+    { range: { start: { line: 2, character: 8 }, end: { line: 2, character: 13 } }, kind: 2 },
+    { range: { start: { line: 4, character: 18 }, end: { line: 4, character: 23 } }, kind: 1 },
+    { range: { start: { line: 5, character: 43 }, end: { line: 5, character: 48 } }, kind: 1 },
+    { range: { start: { line: 6, character: 18 }, end: { line: 6, character: 23 } }, kind: 1 }
+  ]);
+
+  await finish(client);
+});
+
+test('documentHighlights ignores non-state words, comments and plain strings', () => {
+  const document = parseDocument(HIGHLIGHT_PROGRAM);
+  const positions = [
+    positionOf(HIGHLIGHT_PROGRAM, 'Column(gap', 1),
+    positionOf(HIGHLIGHT_PROGRAM, '// count', 3),
+    positionOf(HIGHLIGHT_PROGRAM, 'plain count', 6),
+    positionOf(HIGHLIGHT_PROGRAM, 'Your count', 5)
+  ];
+  for (const position of positions) {
+    assert.deepEqual(documentHighlights(document, position), []);
+  }
+});
+
+test('documentHighlight returns an empty array for an unknown URI', async t => {
+  const client = new Client(['--compiler', stubCompiler]);
+  t.after(() => client.close());
+
+  await client.request(1, 'initialize', { capabilities: {} });
+  const response = await client.request(2, 'textDocument/documentHighlight', {
+    textDocument: { uri: 'file://the temporary checkout-lsp-test/unopened-highlight.opu' },
+    position: { line: 0, character: 0 }
+  });
+  assert.deepEqual(response.result, []);
+
+  await finish(client);
+});
+
 test('malformed params for every new request return InvalidParams', async t => {
   const client = new Client(['--compiler', stubCompiler]);
   t.after(() => client.close());
@@ -895,6 +960,9 @@ test('malformed params for every new request return InvalidParams', async t => {
     ['textDocument/documentSymbol', { textDocument: { uri: 42 } }],
     ['textDocument/references', { textDocument: { uri } }],
     ['textDocument/references', { textDocument: { uri }, position: 'here' }],
+    ['textDocument/documentHighlight', {}],
+    ['textDocument/documentHighlight', { textDocument: { uri } }],
+    ['textDocument/documentHighlight', { textDocument: { uri }, position: 'here' }],
     ['textDocument/prepareRename', { textDocument: { uri } }],
     ['textDocument/prepareRename', {
       textDocument: { uri }, position: { line: -1, character: 0 }
