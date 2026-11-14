@@ -364,6 +364,9 @@ test('JSON-RPC session with a stub compiler', async t => {
     'list', 'get', 'create', 'update', 'delete', 'primary',
     'padding', 'margin', 'color', 'radius', 'shadow', 'gradient', 'glass', 'opacity', 'animate', 'gesture',
     'required', 'minLength', 'maxLength', 'pattern',
+    'variant', 'tone', 'duration',
+    'primary', 'secondary', 'text', 'danger', 'ghost', 'fab',
+    'success', 'warning', 'error', 'info', 'neutral',
     'inertia', 'collision', 'doubleTap', 'longPress', 'drag',
     'count', 'name'
   ]) {
@@ -1216,7 +1219,7 @@ test('semanticTokens returns delta-encoded compiler-accurate tokens', async t =>
   const response = await client.request(2, 'textDocument/semanticTokens/full', {
     textDocument: { uri }
   });
-  // Delta-encoded per the LSP contract: [deltaLine, startChar, length, tokenType,
+  // Delta-encoded per the LSP protocol: [deltaLine, startChar, length, tokenType,
   // modifiers] with tokenType indexing the advertised legend.
   assert.deepEqual(response.result, {
     data: [

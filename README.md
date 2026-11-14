@@ -32,7 +32,7 @@ framing.
 | `textDocument/didChange` | Same as `didOpen` for the new text. |
 | `textDocument/didClose` | Drops the document and clears its diagnostics. |
 | `textDocument/hover` | Markdown for a state (type + initializer), a model (fields), a model field (declared type), a node kind (props) or a canonical prop. An unknown word returns `null`. |
-| `textDocument/completion` | Inside `Kind(` parens, the attributes that node kind accepts, each with a short `documentation` string. Elsewhere, the 100 node kinds, keywords, canonical props (including the `required`/`minLength`/`maxLength`/`pattern` input validators), animate presets (`spring`/`ease`/`inertia`/`collision`/`none`), gesture presets, model field types, API verbs and the declared states and models. |
+| `textDocument/completion` | Inside `Kind(` parens, the attributes that node kind accepts, each with a short `documentation` string. Elsewhere, the 100 node kinds, keywords, canonical props (including the `required`/`minLength`/`maxLength`/`pattern` input validators and the `variant`/`tone`/`duration` design-system props), animate presets (`spring`/`ease`/`inertia`/`collision`/`none`), gesture, design variant and semantic tone presets, model field types, API verbs and the declared states and models. |
 | `textDocument/signatureHelp` | The prop list of the node kind whose `Kind(` parens enclose the cursor, as one signature labelled `Kind(prop, ...)` with a parameter per prop. `activeParameter` is the index of the prop name under the cursor, or `0`. Outside any node parens or for an unknown URI it returns `null`. |
 | `textDocument/definition` | The `state` or `model` declaration line inside the same document. |
 | `textDocument/documentHighlight` | Every classified occurrence of the state name under the cursor, with `kind` 2 for the declaration and `kind` 1 for other occurrences. A cursor outside a classified state name or an unknown document URI returns `[]`. |
@@ -48,9 +48,8 @@ framing.
 
 Unknown methods answer with JSON-RPC error `-32601`. Malformed params for a
 request answer with `-32602`. A malformed frame answers with parse error
-`-32700` and the process stays alive. The contract is defined in
-[the LSP scope contract](the LSP scope contract) and
-[the integration extensions](the integration extensions).
+`-32700` and the process stays alive. The contract is defined in the LSP
+scope contract and the integration extensions.
 
 ## Semantic features
 
@@ -94,7 +93,7 @@ offers to replace the offending name with it. Unknown kinds, type mismatches,
 duplicate names and ambiguous candidate lists yield an empty action list.
 
 `textDocument/semanticTokens/full` classifies a document through the same
-parse the other features use and emits delta-encoded tokens per the LSP contract.
+parse the other features use and emits delta-encoded tokens per the LSP protocol.
 The legend in the `initialize` capabilities lists exactly the four types the
 classifier produces — `state`, `model`, `apiPath` and `nodeKind` — so editors
 colour what the compiler sees: every occurrence the reference classifier
