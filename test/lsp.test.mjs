@@ -547,6 +547,7 @@ test('completion offers catalog attributes inside node parens', async t => {
     'app Shop {',
     '  Button(',
     '  Column(',
+    '  Grid(',
     '}',
     ''
   ].join('\n');
@@ -571,7 +572,19 @@ test('completion offers catalog attributes inside node parens', async t => {
     assert.match(entry.documentation, /Column attribute `/);
   }
 
-  const outside = await client.request(4, 'textDocument/completion', {
+  // The Grid keeps its declared column count on compact widths through a
+  // dedicated prop; the catalog must offer it alongside the wider-tier one.
+  const grid = await client.request(4, 'textDocument/completion', {
+    textDocument: { uri },
+    position: positionOf(program, 'Grid(', 'Grid('.length)
+  });
+  assert.deepEqual(grid.result.items.map(entry => entry.label),
+    ['columns', 'compactColumns']);
+  for (const entry of grid.result.items) {
+    assert.match(entry.documentation, /Grid attribute `/);
+  }
+
+  const outside = await client.request(5, 'textDocument/completion', {
     textDocument: { uri },
     position: positionOf(program, 'app Shop', 0)
   });
