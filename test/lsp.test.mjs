@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument } from '../lib/document.mjs';
 import { NODE_KIND_NAMES } from '../lib/catalog.mjs';
+import { stateOccurrences } from '../lib/symbols.mjs';
 import { completion, hover, signatureHelp } from '../lib/features.mjs';
 import { foldingRanges } from '../lib/folding.mjs';
 import { inlayHints } from '../lib/inlayhint.mjs';
@@ -1370,4 +1371,59 @@ test('signatureHelp classifies the innermost node kind with the shared classifie
   const nested = signatureHelp(document, { line: 1, character: '  Row(padding'.length });
   assert.equal(nested.activeParameter, 1);
   assert.equal(signatureHelp(document, { line: 0, character: 0 }), null);
+});
+
+test('component parameters are not app state occurrences', () => {
+  // A component declares its own parameter names. When one happens to share a
+  // spelling with an app state, rename and semantic highlighting must not
+  // touch the component body: those words are local, not state references.
+  const program = [
+    'app Demo {',
+    '  state count = 0',
+    '  component Card(count: int) {',
+    '    Text("{count}")',
+    '  }',
+    '  Card(count: 1)',
+    '  Text("{count}")',
+    '}',
+    ''
+  ].join('\n');
+  const document = parseDocument(program);
+  const ranges = stateOccurrences(document, 'count');
+  assert.deepEqual(
+    ranges.map(range => [range.start.line, range.start.character]),
+    [[1, 8], [6, 9]],
+    'only the declaration and the app-level interpolation are state occurrences'
+  );
+});
+
+test('rename leaves component-local names intact', async t => {
+  const program = [
+    'app Demo {',
+    '  state count = 0',
+    '  component Card(count: int) {',
+    '    Text("{count}")',
+    '  }',
+    '  Text("{count}")',
+    '}',
+    ''
+  ].join('\n');
+  const client = new Client(['--compiler', stubCompiler]);
+  t.after(() => client.close());
+  await client.request(1, 'initialize', { capabilities: {} });
+  const uri = 'file://the temporary checkout-lsp-test/rename-component.opu';
+  assert.deepEqual(await openDocument(client, uri, program), []);
+
+  const rename = await client.request(2, 'textDocument/rename', {
+    textDocument: { uri },
+    position: positionOf(program, 'count = 0', 0),
+    newName: 'total'
+  });
+  const edits = rename.result.changes[uri];
+  assert.equal(edits.length, 2, 'only the state declaration and app interpolation');
+  assert.ok(edits.every(edit => edit.newText === 'total'));
+  const renamed = applyEdits(program, edits);
+  assert.ok(renamed.includes('state total = 0'));
+  assert.ok(renamed.includes('component Card(count: int)'), 'component parameter unchanged');
+  assert.ok(renamed.includes('Text("{count}")'), 'component interpolation unchanged');
 });
