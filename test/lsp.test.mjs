@@ -360,7 +360,8 @@ test('JSON-RPC session with a stub compiler', async t => {
     'Column', 'Card', 'Switch', 'Spinner', 'Grid',
     'app', 'state', 'model', 'api', 'theme', 'if', 'for',
     'list', 'get', 'create', 'update', 'delete', 'primary',
-    'padding', 'margin', 'color', 'radius', 'shadow', 'gradient', 'glass', 'opacity', 'animate',
+    'padding', 'margin', 'color', 'radius', 'shadow', 'gradient', 'glass', 'opacity', 'animate', 'gesture',
+    'inertia', 'doubleTap', 'longPress', 'drag',
     'count', 'name'
   ]) {
     assert.ok(labels.includes(expected), `completion offers ${expected}`);
