@@ -364,14 +364,17 @@ test('JSON-RPC session with a stub compiler', async t => {
     'list', 'get', 'create', 'update', 'delete', 'primary',
     'padding', 'margin', 'color', 'radius', 'shadow', 'gradient', 'glass', 'opacity', 'animate', 'gesture',
     'required', 'minLength', 'maxLength', 'pattern',
-    'variant', 'tone', 'duration',
+    'variant', 'tone',
     'primary', 'secondary', 'text', 'danger', 'ghost', 'fab',
     'success', 'warning', 'error', 'info', 'neutral',
     'inertia', 'collision', 'doubleTap', 'longPress', 'drag',
-    'count', 'name'
+    'count', 'name',
+    'VStack'
   ]) {
     assert.ok(labels.includes(expected), `completion offers ${expected}`);
   }
+  // `duration` is an IR-only prop the compiler rejects in source.
+  assert.ok(!labels.includes('duration'));
 
   const definition = await client.request(5, 'textDocument/definition', {
     textDocument: { uri },
@@ -560,20 +563,29 @@ test('completion offers catalog attributes inside node parens', async t => {
     textDocument: { uri },
     position: positionOf(program, 'Button(', 'Button('.length)
   });
-  assert.deepEqual(button.result.items.map(entry => entry.label), ['label']);
-  assert.equal(button.result.items[0].detail, 'Button attribute');
+  // The kind's own props come first, required ones marked, then the props
+  // every kind accepts: generic, design and source shortcuts.
+  const buttonLabels = button.result.items.map(entry => entry.label);
+  assert.deepEqual(buttonLabels.slice(0, 2), ['label', 'width']);
+  assert.equal(button.result.items[0].detail, 'Button attribute (required)');
+  assert.equal(button.result.items[0].sortText, '000');
   assert.match(button.result.items[0].documentation, /Button attribute `label`/);
+  for (const expected of ['color', 'radius', 'animate', 'state', 'variant', 'p', 'm', 'bg', 'rounded']) {
+    assert.ok(buttonLabels.includes(expected), `Button completion offers ${expected}`);
+  }
+  assert.equal(new Set(buttonLabels).size, buttonLabels.length, 'no duplicate props');
 
   const column = await client.request(3, 'textDocument/completion', {
     textDocument: { uri },
     position: positionOf(program, 'Column(', 'Column('.length)
   });
-  assert.deepEqual(column.result.items.map(entry => entry.label),
-    ['gap', 'padding', 'align', 'width']);
+  const columnLabels = column.result.items.map(entry => entry.label);
+  assert.deepEqual(columnLabels.slice(0, 4), ['gap', 'padding', 'align', 'width']);
   for (const entry of column.result.items) {
     assert.equal(typeof entry.documentation, 'string');
-    assert.match(entry.documentation, /Column attribute `/);
+    assert.ok(entry.documentation.length > 0);
   }
+  assert.match(column.result.items[0].documentation, /Column attribute `/);
 
   // The Grid keeps its declared column count on compact widths through a
   // dedicated prop; the catalog must offer it alongside the wider-tier one.
@@ -581,9 +593,9 @@ test('completion offers catalog attributes inside node parens', async t => {
     textDocument: { uri },
     position: positionOf(program, 'Grid(', 'Grid('.length)
   });
-  assert.deepEqual(grid.result.items.map(entry => entry.label),
+  assert.deepEqual(grid.result.items.map(entry => entry.label).slice(0, 2),
     ['columns', 'compactColumns']);
-  for (const entry of grid.result.items) {
+  for (const entry of grid.result.items.slice(0, 2)) {
     assert.match(entry.documentation, /Grid attribute `/);
   }
 
@@ -607,14 +619,86 @@ test('completion leaves node parens at the closing paren', () => {
   const text = 'Button(label: "Column(")\nColumn(';
   const document = parseDocument(text);
   assert.deepEqual(
-    completion(document, { line: 0, character: 7 }).items.map(entry => entry.label),
-    ['label']
+    completion(document, { line: 0, character: 7 }).items.slice(0, 2).map(entry => entry.label),
+    ['label', 'width']
   );
   const closed = completion(document, { line: 0, character: text.indexOf('\n') });
   assert.ok(closed.items.some(entry => entry.label === 'Column'));
   assert.ok(!closed.items.some(entry => entry.label === 'label'));
   const quoted = completion(parseDocument('Text("(")\n'), { line: 0, character: 9 });
   assert.ok(quoted.items.some(entry => entry.label === 'Column'));
+});
+
+test('completion resolves catalog components to their primitive props', () => {
+  const document = parseDocument('app A {\n  VStack(\n}\n');
+  const labels = completion(document, { line: 1, character: 9 }).items.map(entry => entry.label);
+  // VStack lowers to Column, so Column's props complete inside its literal.
+  assert.deepEqual(labels.slice(0, 4), ['gap', 'padding', 'align', 'width']);
+  assert.ok(labels.includes('color'), 'generic props complete too');
+
+  const button = completion(parseDocument('app A {\n  Button(\n}\n'), { line: 1, character: 9 });
+  assert.equal(button.items[0].detail, 'Button attribute (required)');
+  assert.equal(button.items[0].sortText, '000');
+});
+
+test('completion offers allowed values after a prop colon', () => {
+  const program = 'app A {\n  state on = true\n  Column(variant: \n}\n';
+  const variant = completion(parseDocument(program), { line: 2, character: program.split('\n')[2].length });
+  assert.deepEqual(variant.items.map(entry => entry.label),
+    ['primary', 'secondary', 'text', 'danger', 'ghost', 'fab']);
+
+  const boolDoc = 'app A {\n  Column(glass: \n}\n';
+  const bool = completion(parseDocument(boolDoc), { line: 1, character: boolDoc.split('\n')[1].length });
+  assert.deepEqual(bool.items.map(entry => entry.label), ['true', 'false']);
+
+  const bindDoc = 'app A {\n  state on = true\n  Switch(bind: \n}\n';
+  const bind = completion(parseDocument(bindDoc), { line: 2, character: bindDoc.split('\n')[2].length });
+  const on = bind.items.find(entry => entry.label === 'on');
+  assert.ok(on, 'bind completes the declared states');
+  assert.equal(on.detail, 'state: bool');
+
+  // A prop with no value list falls back to the attribute list.
+  const gapDoc = 'app A {\n  Column(gap: \n}\n';
+  const gap = completion(parseDocument(gapDoc), { line: 1, character: gapDoc.split('\n')[1].length });
+  assert.equal(gap.items[0].label, 'gap');
+});
+
+test('completion omits attributes for declared component arguments', () => {
+  const program = [
+    'app A {',
+    '  component Card(title: string) { Text("{title}") }',
+    '  Card(',
+    '}',
+    ''
+  ].join('\n');
+  const document = parseDocument(program);
+  const inside = completion(document, { line: 2, character: '  Card('.length });
+  assert.deepEqual(inside.items, [], 'component arguments are positional');
+
+  const outside = completion(document, { line: 1, character: 0 });
+  const labels = outside.items.map(entry => entry.label);
+  assert.equal(labels.filter(label => label === 'Card').length, 1,
+    'the declared component shadows the node kind');
+  assert.ok(labels.includes('VStack'), 'catalog components complete outside literals');
+});
+
+test('hover explains declared and catalog components', () => {
+  const program = [
+    'app A {',
+    '  component Card(title: string) { Text("t") }',
+    '  VStack(gap: 4) { }',
+    '}',
+    ''
+  ].join('\n');
+  const document = parseDocument(program);
+
+  const local = hover(document, positionOf(program, 'Card(title', 0));
+  assert.match(local.contents.value, /\*\*component\*\* `Card`/);
+  assert.match(local.contents.value, /`title: string`/);
+
+  const alias = hover(document, positionOf(program, 'VStack', 0));
+  assert.match(alias.contents.value, /\*\*component\*\* `VStack`/);
+  assert.match(alias.contents.value, /primitive `Column`/);
 });
 
 test('hover reports state types, model field types and nothing for unknown words', async t => {
