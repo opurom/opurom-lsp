@@ -662,7 +662,7 @@ test('completion offers catalog attributes inside node parens', async t => {
   const buttonLabels = button.result.items.map(entry => entry.label);
   assert.deepEqual(buttonLabels.slice(0, 2), ['label', 'width']);
   assert.equal(button.result.items[0].detail, 'Button attribute (required)');
-  assert.equal(button.result.items[0].sortText, '000');
+  assert.equal(button.result.items[0].sortText, '8999');
   assert.equal(button.result.items[0].filterText, 'label');
   assert.equal(button.result.items[0].insertTextFormat, 2);
   assert.equal(button.result.items[0].textEdit.newText, 'label: ${1:value}');
@@ -672,6 +672,7 @@ test('completion offers catalog attributes inside node parens', async t => {
   const color = button.result.items.find(entry => entry.label === 'color');
   assert.equal(color.textEdit.newText, 'color: ');
   assert.equal(color.insertTextFormat, undefined);
+  assert.equal(color.sortText, '9101'); // generic tier 900, offset by position
   assert.match(button.result.items[0].documentation, /Button attribute `label`/);
   for (const expected of ['color', 'radius', 'animate', 'state', 'variant', 'p', 'm', 'bg', 'rounded']) {
     assert.ok(buttonLabels.includes(expected), `Button completion offers ${expected}`);
@@ -729,6 +730,23 @@ test('completion replaces a typed attribute prefix with the named argument', () 
   assert.equal(label.textEdit.newText, 'label: ${1:value}');
 });
 
+test('completion ranks by relevance through sortText', () => {
+  const program = [
+    'app A {',
+    '  state count = 0',
+    '  component Card(t: string) { Text("{t}") }',
+    '}',
+    ''
+  ].join('\n');
+  const items = completion(parseDocument(program), { line: 0, character: 0 }).items;
+  const byLabel = new Map(items.map(entry => [entry.label, entry]));
+  assert.equal(byLabel.get('count').sortText, '8999');   // state: 1000
+  assert.equal(byLabel.get('Card').sortText, '9099');    // local component: 900
+  assert.equal(byLabel.get('Column').sortText, '9399');  // node kind: 600
+  assert.equal(byLabel.get('app').sortText, '9699');     // keyword: 300
+  assert.equal('relevance' in byLabel.get('count'), false, 'relevance stays internal');
+});
+
 test('completion leaves node parens at the closing paren', () => {
   const text = 'Button(label: "Column(")\nColumn(';
   const document = parseDocument(text);
@@ -752,7 +770,7 @@ test('completion resolves catalog components to their primitive props', () => {
 
   const button = completion(parseDocument('app A {\n  Button(\n}\n'), { line: 1, character: 9 });
   assert.equal(button.items[0].detail, 'Button attribute (required)');
-  assert.equal(button.items[0].sortText, '000');
+  assert.equal(button.items[0].sortText, '8999');
 });
 
 test('completion offers allowed values after a prop colon', () => {
