@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument } from '../lib/document.mjs';
+import { parseCompilerOutput, toLspDiagnostics } from '../lib/diagnostics.mjs';
 import { NODE_KIND_NAMES } from '../lib/catalog.mjs';
 import { stateOccurrences } from '../lib/symbols.mjs';
 import { completion, hover, signatureHelp } from '../lib/features.mjs';
@@ -327,6 +328,8 @@ test('JSON-RPC session with a stub compiler', async t => {
   const diagnostics = await waitForDiagnostics(client, uri);
   assert.equal(diagnostics.length, 1);
   assert.equal(diagnostics[0].severity, 1);
+  assert.equal(diagnostics[0].code, 'opurom.unknown-state');
+  assert.match(diagnostics[0].data.correctionMessage, /declare|use one of/);
   assert.equal(diagnostics[0].range.start.line, 3);
   assert.equal(diagnostics[0].range.start.character, 18);
   assert.match(diagnostics[0].message, /unknown state 'nope'/);
@@ -431,6 +434,34 @@ test('empty diagnostics are not republished for a clean document', async t => {
   await finish(client);
 });
 
+test('diagnostics carry a stable code, tags and the correction text', () => {
+  const output = [
+    "doc.opu:3:18: error: unknown state 'alpha' in Text interpolation",
+    "  help: declare it with 'state alpha = 0' or use one of: count",
+    "doc.opu:5:18: error: unknown state 'beta' in Text interpolation",
+    "  help: declare it with 'state beta = 0' or use one of: count",
+    "doc.opu:7:9: error: invalid color '#XYZ' for 'color'",
+    "doc.opu:8:1: warning: unused import 'a.opu'",
+    'doc.opu:9:1: warning: deprecated member use',
+    ''
+  ].join('\n');
+
+  const diagnostics = toLspDiagnostics(parseCompilerOutput(output), output);
+  assert.equal(diagnostics.length, 5);
+  // The same rule maps to one code even when the interpolated name changes.
+  assert.equal(diagnostics[0].code, 'opurom.unknown-state');
+  assert.equal(diagnostics[0].code, diagnostics[1].code);
+  assert.equal(diagnostics[2].code, 'opurom.invalid-color');
+  assert.equal(diagnostics[0].data.correctionMessage,
+    "declare it with 'state alpha = 0' or use one of: count");
+  // The message keeps the appended help line, as before.
+  assert.match(diagnostics[0].message, /help: declare it with/);
+  assert.deepEqual(diagnostics[3].tags, [2]);
+  assert.deepEqual(diagnostics[4].tags, [1]);
+  assert.equal(diagnostics[3].severity, 2);
+  assert.equal(diagnostics[2].data, undefined);
+});
+
 test('malformed frames are reported and the server stays alive', async t => {
   const client = new Client(['--compiler', stubCompiler]);
   t.after(() => client.close());
@@ -515,6 +546,8 @@ test('the real opuromc produces diagnostics', { skip: !fs.existsSync(realCompile
   const diagnostics = await waitForDiagnostics(client, uri);
   assert.equal(diagnostics.length, 1);
   assert.equal(diagnostics[0].severity, 1);
+  assert.equal(diagnostics[0].code, 'opurom.unknown-state');
+  assert.match(diagnostics[0].data.correctionMessage, /declare|use one of/);
   assert.equal(diagnostics[0].range.start.line, 3);
   assert.match(diagnostics[0].message, /unknown state/);
 
