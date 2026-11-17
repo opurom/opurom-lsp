@@ -14,7 +14,7 @@ import { parseDocument } from '../lib/document.mjs';
 import { parseCompilerOutput, toLspDiagnostics, toRange } from '../lib/diagnostics.mjs';
 import { NODE_KIND_NAMES } from '../lib/catalog.mjs';
 import { stateOccurrences } from '../lib/symbols.mjs';
-import { completion, hover, signatureHelp } from '../lib/features.mjs';
+import { completion, definition, hover, signatureHelp } from '../lib/features.mjs';
 import { foldingRanges } from '../lib/folding.mjs';
 import { inlayHints } from '../lib/inlayhint.mjs';
 import { documentHighlights } from '../lib/highlight.mjs';
@@ -1579,6 +1579,24 @@ test('quick fixes from the real opuromc clear its diagnostics',
     await finish(client);
   });
 
+test('definition resolves declared component uses to their declaration', () => {
+  const program = [
+    'app A {',
+    '  state count = 0',
+    '  component Card(title: string) { Text("{title}") }',
+    '  Card("hi")',
+    '}',
+    ''
+  ].join('\n');
+  const document = parseDocument(program);
+  const use = definition(document, positionOf(program, 'Card("hi")', 0));
+  assert.deepEqual(use.range.start, positionOf(program, 'component Card', 10));
+  assert.equal(use.origin, 'component Card');
+  // Existing navigation stays intact, and component parameters are local.
+  assert.equal(definition(document, positionOf(program, 'count = 0', 0)).origin, 'state count');
+  assert.equal(definition(document, positionOf(program, 'title: string', 0)), null);
+});
+
 test('signatureHelp lists node-kind props and tracks the typed attribute', async t => {
   const client = new Client(['--compiler', stubCompiler]);
   t.after(() => client.close());
@@ -1650,6 +1668,32 @@ test('signatureHelp classifies the innermost node kind with the shared classifie
   const nested = signatureHelp(document, { line: 1, character: '  Row(padding'.length });
   assert.equal(nested.activeParameter, 1);
   assert.equal(signatureHelp(document, { line: 0, character: 0 }), null);
+});
+
+test('definition sends a declared component location over JSON-RPC', async t => {
+  const client = new Client(['--compiler', stubCompiler]);
+  t.after(() => client.close());
+  await client.request(1, 'initialize', { capabilities: {} });
+
+  const program = [
+    'app A {',
+    '  component Card(title: string) { Text("{title}") }',
+    '  Card("hi")',
+    '}',
+    ''
+  ].join('\n');
+  const uri = 'file://the temporary checkout-lsp-test/component-definition.opu';
+  assert.deepEqual(await openDocument(client, uri, program), []);
+
+  const result = (await client.request(2, 'textDocument/definition', {
+    textDocument: { uri },
+    position: positionOf(program, 'Card("hi")', 1)
+  })).result;
+  assert.equal(result.uri, uri);
+  assert.deepEqual(result.range.start, positionOf(program, 'component Card', 10));
+  assert.deepEqual(result.range.end, positionOf(program, 'component Card', 14));
+
+  await finish(client);
 });
 
 test('component parameters are not app state occurrences', () => {
