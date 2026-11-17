@@ -313,7 +313,9 @@ test('JSON-RPC session with a stub compiler', async t => {
   assert.equal(initialize.result.capabilities.hoverProvider, true);
   assert.ok(initialize.result.capabilities.completionProvider);
   assert.equal(initialize.result.capabilities.definitionProvider, true);
-  assert.ok(initialize.result.capabilities.diagnosticProvider);
+  // Diagnostics are pushed only; a pull provider is neither implemented nor
+  // advertised, so clients cannot expect textDocument/diagnostic.
+  assert.equal(initialize.result.capabilities.diagnosticProvider, undefined);
 
   await client.notification('initialized', {});
 
@@ -336,6 +338,12 @@ test('JSON-RPC session with a stub compiler', async t => {
   });
   const cleared = await waitForDiagnostics(client, uri);
   assert.deepEqual(cleared, []);
+
+  const pull = await client.request(20, 'textDocument/diagnostic', {
+    textDocument: { uri }
+  });
+  assert.equal(pull.error.code, -32601);
+  assert.match(pull.error.message, /unsupported method/);
 
   const hover = await client.request(2, 'textDocument/hover', {
     textDocument: { uri },
@@ -787,6 +795,7 @@ test('initialize advertises the five new providers', async t => {
   assert.ok(caps.signatureHelpProvider);
   assert.deepEqual(caps.signatureHelpProvider.triggerCharacters, ['(', ',']);
   assert.equal(caps.textDocumentSync, 1);
+  assert.ok(!('diagnosticProvider' in caps), 'push-only diagnostics are not a pull provider');
 
   await finish(client);
 });
@@ -1070,6 +1079,58 @@ test('codeAction quick fixes are unambiguous and clear the diagnostic', async t 
     byTitle.get("Use state 'count'").edit.changes[uri]);
   assert.ok(used.includes('Text("Count: {count}")'));
   assert.deepEqual(await changeDocument(client, uri, used, 3), []);
+
+  await finish(client);
+});
+
+test('codeAction prefers compiler fixes over help text and message regex', async t => {
+  const client = new Client(['--compiler', stubCompiler]);
+  t.after(() => client.close());
+  await client.request(1, 'initialize', { capabilities: {} });
+
+  const program = ['app T {', '  state count = 0', '  Text("{right}")', '}', ''].join('\n');
+  const uri = 'file://the temporary checkout-lsp-test/layers.opu';
+  assert.deepEqual(await openDocument(client, uri, program), []);
+
+  const at = positionOf(program, '{right}', 1);
+  const range = { start: at, end: { line: at.line, character: at.character + 'right'.length } };
+  const request = (id, diagnostic) => client.request(id, 'textDocument/codeAction', {
+    textDocument: { uri },
+    range,
+    context: { diagnostics: [diagnostic] }
+  });
+
+  // The compiler's structured fix wins: no help or message fallback.
+  const codeFix = {
+    range,
+    severity: 1,
+    source: 'opuromc',
+    code: 'opurom.undeclared_state',
+    message: "unknown state 'right' in Text interpolation\n" +
+      "help: declare it with 'state right = 0' or use one of: count",
+    data: { fixes: [{ title: 'Apply compiler fix', changes: { [uri]: [{ range, newText: 'count' }] } }] }
+  };
+  const structured = await request(2, codeFix);
+  assert.deepEqual(structured.result.map(action => action.title), ['Apply compiler fix']);
+  assert.equal(structured.result[0].diagnostics[0].code, 'opurom.undeclared_state');
+
+  // Without structured data the help prefix wins over the message text.
+  const helpOnly = { ...codeFix };
+  delete helpOnly.data;
+  helpOnly.message = "unknown state 'wrong' in Text interpolation\n" +
+    "help: declare it with 'state right = 0' or use one of: count";
+  const fromHelp = (await request(3, helpOnly)).result;
+  assert.deepEqual(fromHelp.map(action => action.title),
+    ["Declare state 'right'", "Use state 'count'"]);
+  for (const action of fromHelp) {
+    assert.equal(action.kind, 'quickfix');
+    assert.equal(action.diagnostics[0].message, helpOnly.message);
+  }
+
+  const unsupported = await request(4, {
+    range, severity: 1, source: 'opuromc', message: 'unknown kind here\nhelp: none'
+  });
+  assert.deepEqual(unsupported.result, []);
 
   await finish(client);
 });

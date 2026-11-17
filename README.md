@@ -24,7 +24,7 @@ framing.
 
 | Method | Behaviour |
 | --- | --- |
-| `initialize` | Returns `textDocumentSync: 1` and the hover, completion, signature help, definition, document highlight, folding range, inlay hint, diagnostic, document symbol, references, rename, document formatting, code action and semantic token providers. |
+| `initialize` | Returns `textDocumentSync: 1` and the hover, completion, signature help, definition, document highlight, folding range, inlay hint, document symbol, references, rename, document formatting, code action and semantic token providers. Diagnostics are pushed only: no `diagnosticProvider` pull capability is advertised and `textDocument/diagnostic` answers `-32601`. |
 | `initialized` | Lifecycle acknowledgement. |
 | `shutdown` | Marks the session as shutting down. |
 | `exit` | Ends the process with code 0 when `shutdown` was seen, 1 otherwise. |
@@ -43,7 +43,7 @@ framing.
 | `textDocument/prepareRename` | Validates the position before `rename`. Returns the state name range and placeholder, or error `-32602` when the position is not on a declared state reference. |
 | `textDocument/rename` | A `WorkspaceEdit` replacing every occurrence of a state name. Declarations inside `model`, `api`, `theme` and `component` blocks declare their own names, so a component parameter sharing a state's spelling is left intact. Rejects invalid identifiers, keywords, existing state names and non-renameable positions with `-32602`. |
 | `textDocument/formatting` | A whole-document `TextEdit` that normalises indentation to two spaces, braces and token spacing. Idempotent. |
-| `textDocument/codeAction` | Quick fixes for the compiler's `unknown state` diagnostic when the compiler's `help:` line makes the edit unambiguous. |
+| `textDocument/codeAction` | Quick fixes in three layers: compiler-supplied structured fixes (`code` + `data.fixes`), the compiler's canonical `help:` prefix, then message text as a fallback. Every action links its diagnostic; no error-code table is kept in the server. |
 | `textDocument/semanticTokens/full` | Delta-encoded `data` with a legend of `state`, `model`, `apiPath` and `nodeKind`, advertised through the `initialize` capabilities. State occurrences reuse the reference classifier, model names cover declarations and api handlers, api paths are the api declaration strings and node kinds are the `Kind(`/`Kind {` uses the parse records. An unknown URI returns `{ data: [] }`. |
 
 Unknown methods answer with JSON-RPC error `-32601`. Malformed params for a
@@ -85,11 +85,15 @@ kinds. Because the emitted layout obeys the same rules on a second pass,
 formatting an already-formatted document returns identical text. Comments,
 string literals and single blank lines are preserved.
 
-`textDocument/codeAction` offers a fix only for the compiler's friendly
-`unknown state` diagnostic. It inserts the exact declaration the compiler's
-`help:` line recommends after the last app-level `state` declaration, and —
-only when the compiler names exactly one existing state as an alternative —
-offers to replace the offending name with it. Unknown kinds, type mismatches,
+`textDocument/codeAction` resolves fixes in three layers. First, if the compiler
+puts structured fixes on the diagnostic (`code` plus `data.fixes`), the server
+passes those edits through without keeping its own error-code table. Next, the
+canonical `help:` prefix yields a fix: it inserts the exact declaration the
+compiler recommends after the last app-level `state` declaration, or — when the
+compiler names exactly one existing state and the change is unambiguous —
+replaces the flagged word. Finally, the message text is scanned as a fallback
+for compilers that emit no structured data. Every returned action links its
+source diagnostic through `diagnostics`. Unknown kinds, type mismatches,
 duplicate names and ambiguous candidate lists yield an empty action list.
 
 `textDocument/semanticTokens/full` classifies a document through the same
