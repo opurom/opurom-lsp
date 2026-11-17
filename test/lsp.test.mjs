@@ -663,6 +663,15 @@ test('completion offers catalog attributes inside node parens', async t => {
   assert.deepEqual(buttonLabels.slice(0, 2), ['label', 'width']);
   assert.equal(button.result.items[0].detail, 'Button attribute (required)');
   assert.equal(button.result.items[0].sortText, '000');
+  assert.equal(button.result.items[0].filterText, 'label');
+  assert.equal(button.result.items[0].insertTextFormat, 2);
+  assert.equal(button.result.items[0].textEdit.newText, 'label: ${1:value}');
+  assert.deepEqual(button.result.items[0].textEdit.range, {
+    start: { line: 1, character: 9 }, end: { line: 1, character: 9 }
+  });
+  const color = button.result.items.find(entry => entry.label === 'color');
+  assert.equal(color.textEdit.newText, 'color: ');
+  assert.equal(color.insertTextFormat, undefined);
   assert.match(button.result.items[0].documentation, /Button attribute `label`/);
   for (const expected of ['color', 'radius', 'animate', 'state', 'variant', 'p', 'm', 'bg', 'rounded']) {
     assert.ok(buttonLabels.includes(expected), `Button completion offers ${expected}`);
@@ -707,6 +716,17 @@ test('completion offers catalog attributes inside node parens', async t => {
     typeof entry.documentation === 'string' && entry.documentation.length > 0));
 
   await finish(client);
+});
+
+test('completion replaces a typed attribute prefix with the named argument', () => {
+  const line = '  Button(lab';
+  const document = parseDocument(`app A {\n${line}\n}\n`);
+  const label = completion(document, { line: 1, character: line.length })
+    .items.find(entry => entry.label === 'label');
+  assert.deepEqual(label.textEdit.range, {
+    start: { line: 1, character: 9 }, end: { line: 1, character: 12 }
+  });
+  assert.equal(label.textEdit.newText, 'label: ${1:value}');
 });
 
 test('completion leaves node parens at the closing paren', () => {
@@ -880,6 +900,8 @@ test('initialize advertises the five new providers', async t => {
   assert.equal(caps.hoverProvider, true);
   assert.ok(caps.signatureHelpProvider);
   assert.deepEqual(caps.signatureHelpProvider.triggerCharacters, ['(', ',']);
+  assert.deepEqual(caps.completionProvider.triggerCharacters,
+    [':', '"', "'", '(', '{', '/', '=', '.']);
   assert.equal(caps.textDocumentSync, 1);
   assert.ok(!('diagnosticProvider' in caps), 'push-only diagnostics are not a pull provider');
 
