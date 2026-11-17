@@ -404,6 +404,33 @@ test('JSON-RPC session with a stub compiler', async t => {
   assert.equal(code, 0);
 });
 
+test('empty diagnostics are not republished for a clean document', async t => {
+  const client = new Client(['--compiler', stubCompiler]);
+  t.after(() => client.close());
+  await client.request(1, 'initialize', { capabilities: {} });
+
+  const uri = 'file://the temporary checkout-lsp-test/quiet.opu';
+  assert.deepEqual(await openDocument(client, uri, GOOD_PROGRAM), []);
+  assert.equal(client.messages.some(message =>
+    message.method === 'textDocument/publishDiagnostics'), false);
+
+  await client.notification('textDocument/didChange', {
+    textDocument: { uri, version: 2 },
+    contentChanges: [{ text: GOOD_PROGRAM }]
+  });
+  // didChange awaits the check, so any extra publish would sit in the queue
+  // before the next response.
+  await client.request(2, 'textDocument/hover', {
+    textDocument: { uri },
+    position: { line: 0, character: 0 }
+  });
+  assert.equal(client.messages.some(message =>
+    message.method === 'textDocument/publishDiagnostics'), false,
+  'a second empty publish would be redundant');
+
+  await finish(client);
+});
+
 test('malformed frames are reported and the server stays alive', async t => {
   const client = new Client(['--compiler', stubCompiler]);
   t.after(() => client.close());
@@ -965,7 +992,9 @@ test('rename rewrites the declaration, interpolation and action body', async t =
   assert.ok(renamed.includes('bind: name'));    // a different state stays intact
   assert.ok(renamed.includes('title: string')); // model fields stay intact
 
-  assert.deepEqual(await changeDocument(client, uri, renamed, 2), []);
+  // Start from the broken text so the clean publish below proves the change.
+  assert.equal((await changeDocument(client, uri, ACTION_PROGRAM, 2)).length, 1);
+  assert.deepEqual(await changeDocument(client, uri, renamed, 3), []);
 
   const after = await client.request(3, 'textDocument/references', {
     textDocument: { uri },
@@ -1033,7 +1062,9 @@ test('formatting is deterministic and idempotent over JSON-RPC', async t => {
   assert.ok(formatted.includes('      Button("-") {'));
   assert.equal(applyEdits(MESSY_PROGRAM, first.result), formatted);
 
-  assert.deepEqual(await changeDocument(client, uri, formatted, 2), []);
+  // Start from the broken text so the clean publish below proves the change.
+  assert.equal((await changeDocument(client, uri, ACTION_PROGRAM, 2)).length, 1);
+  assert.deepEqual(await changeDocument(client, uri, formatted, 3), []);
 
   const second = await client.request(3, 'textDocument/formatting', {
     textDocument: { uri }, options
@@ -1078,7 +1109,10 @@ test('codeAction quick fixes are unambiguous and clear the diagnostic', async t 
   const used = applyEdits(ACTION_PROGRAM,
     byTitle.get("Use state 'count'").edit.changes[uri]);
   assert.ok(used.includes('Text("Count: {count}")'));
-  assert.deepEqual(await changeDocument(client, uri, used, 3), []);
+  // Go back to the broken text first so this fix is proven to clear a live
+  // diagnostic; an already-clean document gets no second empty publish.
+  assert.equal((await changeDocument(client, uri, ACTION_PROGRAM, 3)).length, 1);
+  assert.deepEqual(await changeDocument(client, uri, used, 4), []);
 
   await finish(client);
 });
@@ -1455,8 +1489,10 @@ test('quick fixes from the real opuromc clear its diagnostics',
     })).result;
     assert.ok(actions.length >= 1);
     for (const [index, action] of actions.entries()) {
+      // Restore the broken text so every fix clears a live diagnostic.
+      assert.equal((await changeDocument(client, uri, ACTION_PROGRAM, 3 + index * 2)).length, 1);
       const fixed = applyEdits(ACTION_PROGRAM, action.edit.changes[uri]);
-      assert.deepEqual(await changeDocument(client, uri, fixed, 3 + index), []);
+      assert.deepEqual(await changeDocument(client, uri, fixed, 4 + index * 2), []);
     }
 
     await finish(client);
