@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument } from '../lib/document.mjs';
-import { parseCompilerOutput, toLspDiagnostics } from '../lib/diagnostics.mjs';
+import { parseCompilerOutput, toLspDiagnostics, toRange } from '../lib/diagnostics.mjs';
 import { NODE_KIND_NAMES } from '../lib/catalog.mjs';
 import { stateOccurrences } from '../lib/symbols.mjs';
 import { completion, hover, signatureHelp } from '../lib/features.mjs';
@@ -460,6 +460,32 @@ test('diagnostics carry a stable code, tags and the correction text', () => {
   assert.deepEqual(diagnostics[4].tags, [1]);
   assert.equal(diagnostics[3].severity, 2);
   assert.equal(diagnostics[2].data, undefined);
+});
+
+test('diagnostic spans cover the token that starts at the column', () => {
+  const span = (line, needle, offsetInNeedle = 0) => {
+    const start = line.indexOf(needle) + offsetInNeedle;
+    const range = toRange({ line: 0, character: start }, line);
+    return line.slice(range.start.character, range.end.character);
+  };
+
+  assert.equal(span('  Column(gap: 42)', '42'), '42');
+  assert.equal(span('  opacity: 0.95', '0.95'), '0.95');
+  assert.equal(span('  Text("hi")', '"hi"'), '"hi"');
+  assert.equal(span('  state count = 0', 'count'), 'count');
+  assert.equal(span('  count += 1', '+='), '+='); // symbols stay one character wide
+  assert.equal(span('  name = true', 'true'), 'true');
+
+  // Negative cases: a number stops at the first non-digit character, a broken
+  // quote never crosses the line, an escaped quote is skipped and a column
+  // past the end still yields a one-character span.
+  assert.equal(span('  state a = 12ab', '12'), '12');
+  assert.equal(span('  Text("open', '"'), '"open');
+  assert.equal(span('  Text("a\\"b")', '"'), '"a\\"b"');
+  assert.equal(span('  x', 'x', 2), '');
+  const past = toRange({ line: 0, character: 10 }, '  x');
+  assert.deepEqual(past, { start: { line: 0, character: 10 }, end: { line: 0, character: 11 } });
+  assert.equal(span('  opacity: 0.5', ' ', 1), ' ');
 });
 
 test('malformed frames are reported and the server stays alive', async t => {
