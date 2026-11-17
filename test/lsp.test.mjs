@@ -674,7 +674,8 @@ test('completion offers catalog attributes inside node parens', async t => {
   assert.equal(color.textEdit.newText, 'color: ');
   assert.equal(color.insertTextFormat, undefined);
   assert.equal(color.sortText, '9101'); // generic tier 900, offset by position
-  assert.match(button.result.items[0].documentation, /Button attribute `label`/);
+  assert.deepEqual(button.result.items[0].documentation,
+    { kind: 'markdown', value: 'Button attribute `label`' });
   for (const expected of ['color', 'radius', 'animate', 'state', 'variant', 'p', 'm', 'bg', 'rounded']) {
     assert.ok(buttonLabels.includes(expected), `Button completion offers ${expected}`);
   }
@@ -687,10 +688,10 @@ test('completion offers catalog attributes inside node parens', async t => {
   const columnLabels = column.result.items.map(entry => entry.label);
   assert.deepEqual(columnLabels.slice(0, 4), ['gap', 'padding', 'align', 'width']);
   for (const entry of column.result.items) {
-    assert.equal(typeof entry.documentation, 'string');
-    assert.ok(entry.documentation.length > 0);
+    assert.equal(entry.documentation.kind, 'markdown');
+    assert.ok(entry.documentation.value.length > 0);
   }
-  assert.match(column.result.items[0].documentation, /Column attribute `/);
+  assert.match(column.result.items[0].documentation.value, /Column attribute `/);
 
   // The Grid keeps its declared column count on compact widths through a
   // dedicated prop; the catalog must offer it alongside the wider-tier one.
@@ -701,7 +702,7 @@ test('completion offers catalog attributes inside node parens', async t => {
   assert.deepEqual(grid.result.items.map(entry => entry.label).slice(0, 2),
     ['columns', 'compactColumns']);
   for (const entry of grid.result.items.slice(0, 2)) {
-    assert.match(entry.documentation, /Grid attribute `/);
+    assert.match(entry.documentation.value, /Grid attribute `/);
   }
 
   const outside = await client.request(5, 'textDocument/completion', {
@@ -715,7 +716,7 @@ test('completion offers catalog attributes inside node parens', async t => {
   assert.ok(labels.includes('app'));
   assert.ok(!labels.includes('label'));
   assert.ok(outside.result.items.every(entry =>
-    typeof entry.documentation === 'string' && entry.documentation.length > 0));
+    entry.documentation?.kind === 'markdown' && entry.documentation.value.length > 0));
 
   await finish(client);
 });
@@ -762,6 +763,17 @@ test('completion replaces a typed attribute prefix with the named argument', () 
     start: { line: 1, character: 9 }, end: { line: 1, character: 12 }
   });
   assert.equal(label.textEdit.newText, 'label: ${1:value}');
+});
+
+test('completion documentation is structured markdown', () => {
+  const items = completion(parseDocument('app A {\n  state n = 0\n}\n'),
+    { line: 0, character: 0 }).items;
+  assert.ok(items.length > 0);
+  for (const entry of items) {
+    assert.equal(entry.documentation.kind, 'markdown');
+    assert.equal(typeof entry.documentation.value, 'string');
+    assert.ok(entry.documentation.value.length > 0);
+  }
 });
 
 test('completion ranks by relevance through sortText', () => {
