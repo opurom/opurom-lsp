@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument } from '../lib/document.mjs';
 import { parseCompilerOutput, toLspDiagnostics, toRange } from '../lib/diagnostics.mjs';
+import { createFuzzyMatcher } from '../lib/fuzzy.mjs';
 import { NODE_KIND_NAMES } from '../lib/catalog.mjs';
 import { stateOccurrences } from '../lib/symbols.mjs';
 import { completion, definition, hover, signatureHelp } from '../lib/features.mjs';
@@ -717,6 +718,39 @@ test('completion offers catalog attributes inside node parens', async t => {
     typeof entry.documentation === 'string' && entry.documentation.length > 0));
 
   await finish(client);
+});
+
+test('fuzzy ranking follows the analyzer TEXT-mode scorer', () => {
+  // Cases mirrored from the analyzer's own matcher tests.
+  for (const [pattern, low, high] of [
+    ['jade', 'jump to a directory in tree', 'fix imports and dependencies using jade (java only)'],
+    ['unedit', 'Undo an edit', 'Close unedited tabs'],
+    ['fix', 'find next match', 'format edited lines in workspace files (g4 fix)']
+  ]) {
+    const matcher = createFuzzyMatcher(pattern);
+    assert.ok(matcher.score(low) >= 0, `${low} matches ${pattern}`);
+    assert.ok(matcher.score(low) < matcher.score(high), `${high} ranks above ${low}`);
+  }
+  const abc = createFuzzyMatcher('abc');
+  assert.equal(abc.score('def'), -1);
+  assert.equal(abc.score('abd'), -1);
+  assert.equal(abc.score('abc'), 1);
+  assert.ok(abc.score('Ab stuff c') > 0);
+  assert.equal(createFuzzyMatcher('').score('anything'), 1);
+});
+
+test('completion filters and orders candidates by fuzzy score', () => {
+  const document = parseDocument('app A {\n  Grid(cc\n}\n');
+  const labels = completion(document, { line: 1, character: 10 })
+    .items.map(entry => entry.label);
+  assert.ok(labels.includes('compactColumns'), 'camel abbreviation matches');
+  assert.ok(!labels.includes('color'), 'a non-subsequence is filtered out');
+
+  const ordered = completion(parseDocument('app A {\n  Grid(col\n}\n'),
+    { line: 1, character: 11 }).items;
+  const rank = new Map(ordered.map((entry, index) => [entry.label, index]));
+  assert.ok(rank.get('color') < rank.get('compactColumns'),
+    'a prefix match outranks a loose subsequence');
 });
 
 test('completion replaces a typed attribute prefix with the named argument', () => {
